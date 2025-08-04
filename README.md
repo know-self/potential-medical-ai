@@ -51,8 +51,8 @@ A modern, intelligent healthcare chatbot platform built with React and powered b
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/ai-healthcare-platform.git
-   cd ai-healthcare-platform
+   git clone https://github.com/know-self/potential-medical-ai.git
+   cd potential-medical-ai
    ```
 
 2. **Install dependencies**
@@ -69,6 +69,7 @@ A modern, intelligent healthcare chatbot platform built with React and powered b
    ```env
    VITE_OPENROUTER_API_KEY=your_openrouter_api_key_here
    VITE_GOOGLE_AI_API_KEY=your_google_ai_api_key_here
+   VITE_API_BASE_URL=your-json-server
    ```
 
 4. **Start the development server**
@@ -77,7 +78,7 @@ A modern, intelligent healthcare chatbot platform built with React and powered b
    ```
 
 5. **Open your browser**
-   Navigate to `http://localhost:5173`
+   Navigate to `http://localhost:3000` & 'http://localhost:3001'
 
 ## 🔑 API Keys Setup
 
@@ -95,6 +96,10 @@ A modern, intelligent healthcare chatbot platform built with React and powered b
 
 ```
 AI_platform/
+├── json-server/
+│   ├── db.json              # Structed DB
+│   ├── package.json	     # Dependencies and scripts
+│   ├── server.js 	     # Build and security scripts
 ├── src/
 │   ├── components/          # React components
 │   │   ├── ChatHeader.jsx   # Chat header with controls
@@ -160,7 +165,60 @@ npm run dev          # Start development server
 npm run build        # Build for production
 npm run preview      # Preview production build
 npm run server       # Start JSON server for local data
-npm run security-check # Run security validation
+```
+### Run JSON server to handle basic Database (Setup with Render.com)
+```
+// server.js
+const jsonServer = require('json-server')
+const server = jsonServer.create()
+const router = jsonServer.router('db.json')
+const middlewares = jsonServer.defaults()
+
+// CORS tùy chỉnh
+server.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', 'https://yourdomain.com') // hoặc thay bằng '*'
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization')
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204)
+  }
+
+  next()
+})
+
+// Body parser cho POST/PUT
+server.use(jsonServer.bodyParser)
+
+// Middleware mặc định của json-server
+server.use(middlewares)
+// Route mặc định
+server.use(router)
+
+const port = process.env.PORT || 3001
+server.listen(port, () => {
+  console.log(`✅ JSON Server running at http://localhost:${port}`)
+})
+
+// package.json
+{
+    "name": "json-server-api",
+    "version": "1.0.0",
+    "main": "server.js",
+    "scripts": {
+      "start": "node server.js",
+      "dev": "json-server --watch db.json --port 3001"
+    },
+    "dependencies": {
+      "json-server": "^0.17.4"
+    }
+  }
+
+//db.json
+{
+  "chats": [],
+  "messages": []
+}
 ```
 
 ### Adding New Features
@@ -213,7 +271,7 @@ npm run security-check # Run security validation
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache-2.0 License.
 
 ## 🙏 Acknowledgments
 
@@ -227,7 +285,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 If you encounter any issues or have questions:
 
-1. Check the [Issues](https://github.com/yourusername/ai-healthcare-platform/issues) page
+1. Check the [Issues](https://github.com/know-self/potential-medical-ai/issues) page
 2. Create a new issue with detailed information
 3. Include your environment details and error messages
 
