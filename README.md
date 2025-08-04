@@ -77,8 +77,16 @@ A modern, intelligent healthcare chatbot platform built with React and powered b
    npm run dev
    ```
 
+4.1. **Build the production server**
+   ```bash
+   npm run build
+   ```
+
 5. **Open your browser**
-   Navigate to `http://localhost:3000` & 'http://localhost:3001'
+   Navigate to `http://localhost:3000` & `http://localhost:3001`
+
+6. **Deployment later**
+   Comming soon.
 
 ## 🔑 API Keys Setup
 
