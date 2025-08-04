@@ -40,12 +40,19 @@ A modern, intelligent healthcare chatbot platform built with React and powered b
 - **Performance**: Optimized for fast loading and smooth interactions
 - **Analytics**: Built-in usage tracking and performance monitoring
 
+### 🎶 ***To-do in the upcoming:***
+- In this project, when completed your build-version all stylesheet/scripts will be export because we don't make any call to server like requested for authentication so that **CLIENT-process** and it's has bumped many hidden gems from your source, just make senses about protecting your flow (means AI Prompted in the background). I will update the middleware structure of project in the next few weeks. From now, this project just basic at all. Keep focus on **build your own backend" with higher security.
+- Chat Unique-id on URL-params (expected to share with doctor-networking).
+- Adding Deep Thinking to dive in the uploaded.
+- Adding supporting media files.
+- Updating Multilanguage Responding to user.
+
 ## 🚀 Quick Start
 
 ### Prerequisites
 - Node.js (v16 or higher)
 - npm or yarn package manager
-- API keys for OpenRouter and Google AI
+- API keys for OpenRouter and Google AI Studio
 
 ### Installation
 
@@ -121,7 +128,7 @@ AI_platform/
 │   │   ├── flow/           # Prompt management system
 │   │   ├── orchestrator/   # Healthcare orchestrator
 │   │   ├── parallel/       # Parallel processing
-│   │   ├── rag/           # RAG (Retrieval-Augmented Generation)
+│   │   ├── rag/            # RAG (Retrieval-Augmented Generation)
 │   │   ├── chatHistory.js  # Chat history management
 │   │   ├── googleAI.js     # Google AI integration
 │   │   └── openrouter.js   # OpenRouter API integration
