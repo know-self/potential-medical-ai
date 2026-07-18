@@ -1,44 +1,32 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { OpenRouterService } from './services/openrouter';
-import { ChatHistoryService } from './services/chatHistory';
-import { HealthcareOrchestrator } from './services/orchestrator/HealthcareOrchestrator.js';
-import ChatMessage from './components/ChatMessage';
-import ChatInput from './components/ChatInput';
+import React, { useEffect, useRef, useState } from 'react';
 import ChatHeader from './components/ChatHeader';
+import ChatInput from './components/ChatInput';
+import ChatMessage from './components/ChatMessage';
 import ChatSidebar from './components/ChatSidebar';
 import WelcomeMessage from './components/WelcomeMessage';
-import { cn } from './utils/cn';
-import { getTheme, setTheme, toggleTheme, initializeTheme } from './utils/theme';
+import { ChatHistoryService } from './services/chatHistory';
+import { HealthcareOrchestrator } from './services/orchestrator/HealthcareOrchestrator.js';
+import { getTheme, initializeTheme, toggleTheme } from './utils/theme';
 
 function App() {
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [openRouterService, setOpenRouterService] = useState(null);
   const [chatHistoryService, setChatHistoryService] = useState(null);
   const [healthcareOrchestrator, setHealthcareOrchestrator] = useState(null);
   const [orchestratorStats, setOrchestratorStats] = useState(null);
-  const [apiKeyError, setApiKeyError] = useState('');
+  const [connectionError, setConnectionError] = useState('');
   const [chats, setChats] = useState([]);
   const [currentChatId, setCurrentChatId] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [theme, setThemeState] = useState('dark');
-  const [selectedAgent] = useState('HOSPITAL_SUPPORT'); // Only healthcare agent
   const [isOrchestratorReady, setIsOrchestratorReady] = useState(false);
+  const [exampleMessage, setExampleMessage] = useState(null);
   const messagesEndRef = useRef(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ 
-      behavior: 'smooth',
-      block: 'end',
-      inline: 'nearest'
-    });
-  };
-
   useEffect(() => {
-    scrollToBottom();
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages]);
 
-  // Initialize theme
   useEffect(() => {
     initializeTheme();
     setThemeState(getTheme());
@@ -46,229 +34,136 @@ function App() {
 
   useEffect(() => {
     const initializeServices = async () => {
-      // Initialize services
-      const openRouterApiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
-      const googleApiKey = import.meta.env.VITE_GOOGLE_AI_API_KEY;
-      
-      if (!openRouterApiKey || openRouterApiKey === 'your_openrouter_api_key_here') {
-        setApiKeyError('Please set VITE_OPENROUTER_API_KEY in your .env file');
-        return;
-      }
-
-      if (!googleApiKey || googleApiKey === 'your_google_ai_api_key_here') {
-        setApiKeyError('Please set VITE_GOOGLE_AI_API_KEY in your .env file');
-        return;
-      }
-
       try {
-        // Step 1: Initialize HealthcareOrchestrator first
-        console.log('Initializing HealthcareOrchestrator...');
-        const healthcareOrchestrator = new HealthcareOrchestrator(openRouterApiKey, googleApiKey);
-        await healthcareOrchestrator.initialize();
-        setHealthcareOrchestrator(healthcareOrchestrator);
+        const history = new ChatHistoryService();
+        const orchestrator = new HealthcareOrchestrator();
+        await orchestrator.initialize();
+        setChatHistoryService(history);
+        setHealthcareOrchestrator(orchestrator);
+        setOrchestratorStats(orchestrator.getComprehensiveStats());
         setIsOrchestratorReady(true);
-        console.log('HealthcareOrchestrator initialized successfully');
-
-        // Step 2: Initialize other services after orchestrator is ready
-        console.log('Initializing other services...');
-        const openRouterService = new OpenRouterService(openRouterApiKey);
-        const chatHistoryService = new ChatHistoryService();
-        
-        
-        setOpenRouterService(openRouterService);
-        setChatHistoryService(chatHistoryService);
-        setApiKeyError('');
-        
-        setOrchestratorStats(healthcareOrchestrator.getComprehensiveStats());
-        console.log('All services initialized successfully');
+        setConnectionError('');
       } catch (error) {
-        console.error('Error initializing services:', error);
-        setApiKeyError('Invalid API key configuration or initialization failed');
+        console.error('Service initialization failed:', error);
+        setConnectionError('Không thể kết nối Medical API. Hãy chạy npm run server hoặc cấu hình VITE_MEDICAL_API_URL.');
       }
     };
-
     initializeServices();
   }, []);
 
-  const handleSendMessage = async (message) => {
-    if (!openRouterService || !chatHistoryService || !healthcareOrchestrator || !isOrchestratorReady) {
-      console.log('Services not ready:', { 
-        openRouterService: !!openRouterService, 
-        chatHistoryService: !!chatHistoryService, 
-        healthcareOrchestrator: !!healthcareOrchestrator,
-        isOrchestratorReady
-      });
-      return;
-    }
-
-    // Clear example message after sending
-    setExampleMessage(null);
-
-    let chatId = currentChatId;
-
-    // Create new chat if none exists
-    if (!chatId) {
-      try {
-        const newChat = await chatHistoryService.createChat();
-        setChats(prev => [newChat, ...prev]);
-        setCurrentChatId(newChat.id);
-        chatId = newChat.id;
-      } catch (error) {
-        console.error('Error creating new chat:', error);
-        return;
-      }
-    }
-
-    const userMessage = { role: 'user', content: message };
-    
-    // Add user message to storage
-    try {
-      await chatHistoryService.addMessage(chatId, userMessage);
-      setMessages(prev => [...prev, userMessage]);
-    } catch (error) {
-      console.error('Error adding user message:', error);
-      return;
-    }
-    
-    setIsLoading(true);
-
-    try {
-      // Add assistant message with empty content for streaming
-      const assistantMessage = { role: 'assistant', content: '', isTyping: false };
-      setMessages(prev => [...prev, assistantMessage]);
-
-      const conversationHistory = [
-        ...messages.map(msg => ({
-          role: msg.role,
-          content: msg.content
-        })),
-        { role: 'user', content: message }
-      ];
-
-      // Initialize streaming response
-      let streamingResponse = '';
-      
-      // Process with healthcare orchestrator with streaming
-      const orchestratorResult = await healthcareOrchestrator.processUserQuery(
-        message, 
-        conversationHistory, 
-        chatId,
-        (chunk) => {
-          // Handle streaming chunks - update the assistant message directly
-          streamingResponse += chunk;
-          setMessages(prev => {
-            const newMessages = [...prev];
-            const lastMessage = newMessages[newMessages.length - 1];
-            if (lastMessage && lastMessage.role === 'assistant') {
-              lastMessage.content = streamingResponse;
-            }
-            return newMessages;
-          });
-        }
-      );
-      
-      // Update the assistant message with final content
-      const finalContent = orchestratorResult.response || streamingResponse;
-      setMessages(prev => {
-        const newMessages = [...prev];
-        const lastMessage = newMessages[newMessages.length - 1];
-        if (lastMessage && lastMessage.role === 'assistant') {
-          lastMessage.content = finalContent;
-        }
-        return newMessages;
-      });
-      
-      // Add the AI response to chat history
-      try {
-        await chatHistoryService.addMessage(chatId, { role: 'assistant', content: finalContent });
-      } catch (error) {
-        console.error('Error adding assistant message:', error);
-      }
-      
-      // Analytics processing is handled by the orchestrator in the background
-      console.log('Healthcare orchestrator processing completed for chat:', chatId);
-
-      // Reload chats to update the current chat's metadata
-      await loadChats();
-      
-      // Update orchestrator stats
-      setOrchestratorStats(healthcareOrchestrator.getComprehensiveStats());
-    } catch (error) {
-      console.error('Error sending message:', error);
-      const errorMessage = { 
-        role: 'assistant', 
-        content: 'We are currently adapting information for you. Please wait a moment and try again.',
-        isTyping: false
-      };
-      
-      try {
-        await chatHistoryService.addMessage(chatId, errorMessage);
-      } catch (addError) {
-        console.error('Error adding error message:', addError);
-      }
-      
-      setMessages(prev => {
-        const newMessages = prev.filter(msg => !msg.isTyping);
-        return [...newMessages, errorMessage];
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Load chat history
-  useEffect(() => {
-    if (chatHistoryService) {
-      loadChats();
-    }
-  }, [chatHistoryService]);
-
-  // Load chats from storage
   const loadChats = async () => {
+    if (!chatHistoryService) return;
     try {
-      const allChats = await chatHistoryService.getAllChats();
-      setChats(allChats);
+      setChats(await chatHistoryService.getAllChats());
     } catch (error) {
       console.error('Error loading chats:', error);
     }
   };
 
-  // Create new chat
+  useEffect(() => {
+    loadChats();
+  }, [chatHistoryService]);
+
+  const createChatIfNeeded = async () => {
+    if (currentChatId) return currentChatId;
+    const newChat = await chatHistoryService.createChat();
+    setChats((previous) => [newChat, ...previous]);
+    setCurrentChatId(newChat.id);
+    return newChat.id;
+  };
+
+  const handleSendMessage = async (message) => {
+    if (!chatHistoryService || !healthcareOrchestrator || !isOrchestratorReady || isLoading) return;
+    setExampleMessage(null);
+    let chatId;
+
+    try {
+      chatId = await createChatIfNeeded();
+      const userMessage = { role: 'user', content: message };
+      await chatHistoryService.addMessage(chatId, userMessage);
+      setMessages((previous) => [...previous, userMessage, { role: 'assistant', content: '', isTyping: false }]);
+      setIsLoading(true);
+
+      const conversationHistory = [
+        ...messages.map(({ role, content }) => ({ role, content })),
+        userMessage
+      ];
+      let streamingResponse = '';
+      const result = await healthcareOrchestrator.processUserQuery(
+        message,
+        conversationHistory,
+        chatId,
+        (chunk) => {
+          streamingResponse += chunk;
+          setMessages((previous) => {
+            const next = [...previous];
+            const last = next[next.length - 1];
+            if (last?.role === 'assistant') next[next.length - 1] = { ...last, content: streamingResponse };
+            return next;
+          });
+        }
+      );
+
+      const finalContent = result.response || streamingResponse || result.error || 'No response was generated.';
+      setMessages((previous) => {
+        const next = [...previous];
+        const last = next[next.length - 1];
+        if (last?.role === 'assistant') next[next.length - 1] = { ...last, content: finalContent };
+        return next;
+      });
+      await chatHistoryService.addMessage(chatId, { role: 'assistant', content: finalContent });
+      await loadChats();
+      setOrchestratorStats(healthcareOrchestrator.getComprehensiveStats());
+      setConnectionError('');
+    } catch (error) {
+      console.error('Error sending message:', error);
+      const errorContent = 'Hệ thống kiến thức hoặc mô hình đang tạm thời không khả dụng. Nếu có triệu chứng khẩn cấp, hãy liên hệ cấp cứu địa phương; nếu không, vui lòng thử lại.';
+      setMessages((previous) => {
+        const next = previous.filter((item) => !item.isTyping);
+        const last = next[next.length - 1];
+        if (last?.role === 'assistant' && !last.content) next[next.length - 1] = { ...last, content: errorContent };
+        else next.push({ role: 'assistant', content: errorContent });
+        return next;
+      });
+      if (chatId) {
+        try {
+          await chatHistoryService.addMessage(chatId, { role: 'assistant', content: errorContent });
+        } catch {
+          // Preserve the visible error even when chat persistence is unavailable.
+        }
+      }
+      setConnectionError(error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleNewChat = async () => {
     try {
       const newChat = await chatHistoryService.createChat();
-      setChats(prev => [newChat, ...prev]);
+      setChats((previous) => [newChat, ...previous]);
       setCurrentChatId(newChat.id);
       setMessages([]);
       setSidebarOpen(false);
     } catch (error) {
-      console.error('Error creating new chat:', error);
+      console.error('Error creating chat:', error);
     }
   };
 
-  // Select a chat
   const handleSelectChat = async (chatId) => {
     try {
-      const chatMessages = await chatHistoryService.getChatMessages(chatId);
-      setMessages(chatMessages);
+      setMessages(await chatHistoryService.getChatMessages(chatId));
       setCurrentChatId(chatId);
       setSidebarOpen(false);
-      
-      // Analytics processing is handled by the orchestrator when needed
-      if (chatMessages.length > 0) {
-        console.log('Chat loaded, analytics will be processed by orchestrator');
-      }
     } catch (error) {
-      console.error('Error loading chat messages:', error);
+      console.error('Error loading chat:', error);
     }
   };
 
-  // Delete a chat
   const handleDeleteChat = async (chatId) => {
     try {
       await chatHistoryService.deleteChat(chatId);
-      setChats(prev => prev.filter(chat => chat.id !== chatId));
-      
+      setChats((previous) => previous.filter((chat) => chat.id !== chatId));
       if (currentChatId === chatId) {
         setCurrentChatId(null);
         setMessages([]);
@@ -280,58 +175,31 @@ function App() {
 
   const handleClearChat = async () => {
     if (currentChatId && chatHistoryService) {
-      try {
-        await chatHistoryService.clearChatMessages(currentChatId);
-        setMessages([]);
-        await loadChats(); // Reload chats to update message count
-      } catch (error) {
-        console.error('Error clearing chat:', error);
-      }
-    } else {
-      setMessages([]);
+      await chatHistoryService.clearChatMessages(currentChatId);
+      await loadChats();
     }
-  };
-
-  const handleToggleTheme = () => {
-    const newTheme = toggleTheme();
-    setThemeState(newTheme);
+    setMessages([]);
   };
 
   const handleUpdateChatTitle = async (chatId, newTitle) => {
     try {
       await chatHistoryService.updateChatTitle(chatId, newTitle);
-      await loadChats(); // Reload chats to update the title
+      await loadChats();
     } catch (error) {
       console.error('Error updating chat title:', error);
     }
   };
 
-  // Agent is fixed to healthcare only
-
-  const [exampleMessage, setExampleMessage] = useState(null);
-
-  const handleExampleClick = (exampleText) => {
-    setExampleMessage(exampleText);
-  };
-
-  // Handle orchestrator stats updates
-  const handleStatsUpdate = () => {
-    if (healthcareOrchestrator) {
-      setOrchestratorStats(healthcareOrchestrator.getComprehensiveStats());
-    }
+  const handleToggleTheme = () => {
+    setThemeState(toggleTheme());
   };
 
   return (
     <div className="chat-container">
-      {/* Mobile Overlay */}
       {sidebarOpen && (
-        <div 
-          className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
-      {/* Sidebar */}
       <ChatSidebar
         chats={chats}
         currentChatId={currentChatId}
@@ -343,33 +211,24 @@ function App() {
         onClose={() => setSidebarOpen(false)}
       />
 
-      {/* Main Chat Area */}
       <div className="chat-main">
-        {/* Header */}
-        <ChatHeader 
+        <ChatHeader
           onClearChat={handleClearChat}
           hasMessages={messages.length > 0}
-          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+          onToggleSidebar={() => setSidebarOpen((value) => !value)}
           theme={theme}
           onToggleTheme={handleToggleTheme}
         />
 
-        {/* Chat Messages */}
         <div className="chat-messages">
           <div className="chat-messages-content">
             {messages.length === 0 ? (
-              <WelcomeMessage 
-                onExampleClick={handleExampleClick}
-              />
+              <WelcomeMessage onExampleClick={setExampleMessage} />
             ) : (
               <div className="space-y-4">
                 {messages.map((message, index) => (
-                  <div key={index} className="slide-in-up">
-                    <ChatMessage
-                      message={message.content}
-                      isUser={message.role === 'user'}
-                      isTyping={message.isTyping}
-                    />
+                  <div key={`${message.role}-${index}`} className="slide-in-up">
+                    <ChatMessage message={message.content} isUser={message.role === 'user'} isTyping={message.isTyping} />
                   </div>
                 ))}
                 <div ref={messagesEndRef} />
@@ -378,35 +237,30 @@ function App() {
           </div>
         </div>
 
-        {/* Input */}
-        <ChatInput 
+        <ChatInput
           onSendMessage={handleSendMessage}
           isLoading={isLoading}
-          placeholder={openRouterService ? "Nhập tin nhắn của bạn..." : "Đang thiết lập kết nối..."}
-          disabled={!openRouterService}
+          placeholder={isOrchestratorReady ? 'Nhập câu hỏi sức khỏe của bạn...' : 'Đang kết nối nền tảng kiến thức y khoa...'}
+          disabled={!isOrchestratorReady}
           exampleMessage={exampleMessage}
         />
       </div>
 
-      {/* API Key Error */}
-      {apiKeyError && (
+      {connectionError && (
         <div className="fixed bottom-2 right-2 sm:bottom-4 sm:right-4 bg-red-50 border border-red-200 rounded-lg shadow-lg p-3 sm:p-4 max-w-xs sm:max-w-sm z-50">
-          <div className="flex items-start gap-2 sm:gap-3">
-            <div className="flex-shrink-0 w-4 h-4 sm:w-5 sm:h-5 bg-red-400 rounded-full flex items-center justify-center">
-              <span className="text-white text-xs">!</span>
-            </div>
-            <div>
-              <h3 className="text-xs sm:text-sm font-medium text-red-800">Configuration Error</h3>
-              <p className="text-xs sm:text-sm text-red-700 mt-1">{apiKeyError}</p>
-              <p className="text-xs text-red-600 mt-2">
-                Hệ thống mất kết nối với cơ sở dữ liệu.
-              </p>
-            </div>
-          </div>
+          <h3 className="text-xs sm:text-sm font-medium text-red-800">Medical API unavailable</h3>
+          <p className="text-xs sm:text-sm text-red-700 mt-1">{connectionError}</p>
+          <p className="text-xs text-red-600 mt-2">API keys must be configured only on the backend.</p>
+        </div>
+      )}
+
+      {orchestratorStats?.rag?.knowledgeBase?.degraded && !connectionError && (
+        <div className="fixed bottom-4 right-4 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+          Knowledge retrieval is running in degraded mode.
         </div>
       )}
     </div>
   );
 }
 
-export default App; 
+export default App;

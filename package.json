@@ -1,20 +1,23 @@
 {
-  "name": "ai-chatbot",
-  "version": "1.0.0",
+  "name": "potential-medical-ai",
+  "version": "2.0.0",
   "type": "module",
-  "description": "Modern AI Chatbot using OpenRouter API with Google Gemma 3 12B",
-  "main": "index.js",
+  "description": "Evidence-aware healthcare assistant with a versioned near-realtime medical knowledge platform",
+  "main": "server/server.js",
   "scripts": {
     "dev": "vite",
+    "dev:web": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "vite",
-    "server": "json-server --watch db.json --port 3001",
+    "start": "node server/server.js",
+    "server": "node server/server.js",
+    "server:chat": "json-server --watch db.json --port 3001",
+    "sync:knowledge": "node server/sync.js",
     "test": "node --test",
+    "check": "npm test && npm run build",
     "security-check": "node scripts/check-security.js"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.24.1",
     "clsx": "^2.0.0",
     "json-server": "^0.17.4",
     "lucide-react": "^0.294.0",
@@ -34,12 +37,13 @@
     "vite": "^4.5.0"
   },
   "keywords": [
-    "chatbot",
-    "ai",
-    "openrouter",
-    "gemma",
+    "medical-ai",
+    "healthcare",
+    "rag",
+    "pubmed",
+    "clinical-guidelines",
     "react"
   ],
   "author": "David Bisky",
-  "license": "MIT"
+  "license": "Apache-2.0"
 }
