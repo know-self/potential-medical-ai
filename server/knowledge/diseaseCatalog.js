@@ -1,21 +1,54 @@
-const RAW_CATALOG = `
-hypertension~Hypertension~Tăng huyết áp~cardiovascular~Hypertension|Tăng huyết áp|high blood pressure|cao huyết áp~often asymptomatic|headache|dizziness~chest pain|neurologic deficit|severe breathlessness~age|obesity|high sodium intake|kidney disease~type-2-diabetes|chronic-kidney-disease|heart-failure|stroke~blood pressure trend|kidney function|electrolytes
-coronary-artery-disease~Coronary artery disease~Bệnh động mạch vành~cardiovascular~Coronary artery disease|Bệnh động mạch vành|ischemic heart disease|bệnh mạch vành~exertional chest discomfort|shortness of breath|fatigue~persistent chest pressure|sweating|fainting~smoking|diabetes|hypertension|dyslipidemia~heart-failure|chronic-kidney-disease~symptom pattern|lipids|blood pressure
-heart-failure~Heart failure~Suy tim~cardiovascular~Heart failure|Suy tim|congestive heart failure|CHF|suy tim sung huyết~breathlessness|leg swelling|orthopnea|fatigue~breathlessness at rest|blue lips|confusion|rapid worsening edema~coronary disease|hypertension|cardiomyopathy~chronic-kidney-disease|atrial-fibrillation|type-2-diabetes|copd~daily weight|symptoms|kidney function|electrolytes
-atrial-fibrillation~Atrial fibrillation~Rung nhĩ~cardiovascular~Atrial fibrillation|Rung nhĩ|AF|AFib~palpitations|fatigue|breathlessness|dizziness~syncope|chest pain|stroke symptoms~age|hypertension|heart disease|thyroid disease~heart-failure|stroke|chronic-kidney-disease~heart rate|rhythm|bleeding risk when anticoagulated
-stroke~Stroke~Đột quỵ~neurology~Stroke|Đột quỵ|cerebrovascular accident|CVA|tai biến mạch máu não~face droop|arm weakness|speech difficulty|sudden imbalance~any sudden focal neurologic deficit~hypertension|atrial fibrillation|diabetes|smoking~dysphagia|mobility impairment|depression~neurologic recovery|swallowing|blood pressure
-type-1-diabetes~Type 1 diabetes mellitus~Đái tháo đường type 1~endocrine~Type 1 diabetes mellitus|Đái tháo đường type 1|T1DM|tiểu đường type 1~thirst|frequent urination|weight loss|fatigue~vomiting|deep breathing|confusion|ketones~autoimmune predisposition|family history~thyroid disease|celiac disease|kidney disease~glucose|ketones when unwell|HbA1c|kidney and eye screening
-type-2-diabetes~Type 2 diabetes mellitus~Đái tháo đường type 2~endocrine~Type 2 diabetes mellitus|Đái tháo đường type 2|T2DM|tiểu đường type 2|đái tháo đường|tiểu đường~thirst|frequent urination|fatigue|slow wound healing~altered consciousness|severe dehydration|very high glucose with illness~obesity|family history|age|gestational diabetes~hypertension|chronic-kidney-disease|fatty liver|cardiovascular disease~glucose|HbA1c|kidney function|eyes|feet
-hypothyroidism~Hypothyroidism~Suy giáp~endocrine~Hypothyroidism|Suy giáp|underactive thyroid|suy tuyến giáp~fatigue|cold intolerance|constipation|weight gain~severe drowsiness|hypothermia|slow breathing~autoimmune thyroiditis|thyroid surgery~dyslipidemia|depression|cardiovascular disease~TSH|free T4|symptoms
-hyperthyroidism~Hyperthyroidism~Cường giáp~endocrine~Hyperthyroidism|Cường giáp|overactive thyroid|cường tuyến giáp~palpitations|heat intolerance|weight loss|tremor~fever|agitation|very fast heart rate|heart failure symptoms~Graves disease|thyroid nodules~atrial-fibrillation|osteoporosis|heart-failure~TSH|free T4/T3|heart rate
-chronic-kidney-disease~Chronic kidney disease~Bệnh thận mạn~renal~Chronic kidney disease|Bệnh thận mạn|CKD|suy thận mạn|bệnh thận mạn~often asymptomatic|fatigue|swelling|itching~breathlessness|confusion|very low urine output|severe weakness~diabetes|hypertension|glomerular disease~heart-failure|anemia|mineral bone disorder|hyperkalemia~eGFR|urine albumin|potassium|hemoglobin|blood pressure
-acute-kidney-injury~Acute kidney injury~Tổn thương thận cấp~renal~Acute kidney injury|Tổn thương thận cấp|AKI|suy thận cấp~reduced urine|nausea|swelling|fatigue~no urine|breathlessness|confusion|arrhythmia symptoms~dehydration|sepsis|nephrotoxic medicines|obstruction~chronic-kidney-disease|heart-failure|liver disease~urine output|creatinine|potassium|fluid balance
-asthma~Asthma~Hen phế quản~respiratory~Asthma|Hen phế quản|bronchial asthma|hen suyễn~wheeze|cough|chest tightness|variable breathlessness~unable to speak full sentences|blue lips|silent chest|exhaustion~allergy|family history|smoke exposure~rhinitis|eczema|obesity|anxiety~symptom control|reliever use|peak flow when advised|inhaler technique
-copd~Chronic obstructive pulmonary disease~Bệnh phổi tắc nghẽn mạn tính~respiratory~Chronic obstructive pulmonary disease|Bệnh phổi tắc nghẽn mạn tính|COPD|chronic bronchitis|emphysema|BPTNMT~chronic cough|sputum|progressive breathlessness~severe breathlessness|blue lips|drowsiness|new confusion~smoking|biomass exposure|occupational exposure~heart disease|osteoporosis|anxiety|lung cancer~exacerbations|oxygen saturation when indicated|spirometry|weight
-pneumonia~Pneumonia~Viêm phổi~infectious~Pneumonia|Viêm phổi|lung infection~fever|cough|sputum|breathlessness~low oxygen|confusion|severe breathlessness|persistent chest pain~age extremes|chronic lung disease|immunosuppression~sepsis|copd|heart-failure~temperature|breathing|oxygenation|hydration
-tuberculosis~Tuberculosis~Lao~infectious~Tuberculosis|Lao|TB|pulmonary tuberculosis|bệnh lao~prolonged cough|weight loss|night sweats|fever~coughing blood|severe breathlessness|neurologic symptoms~close exposure|immunosuppression|crowded living conditions~HIV|type-2-diabetes|malnutrition~treatment adherence|liver toxicity symptoms|microbiologic follow-up
-hepatitis-b~Chronic hepatitis B~Viêm gan B mạn~hepatic~Chronic hepatitis B|Viêm gan B mạn|HBV|viêm gan siêu vi B~often asymptomatic|fatigue|right upper abdominal discomfort~jaundice with confusion|vomiting blood|marked abdominal swelling~perinatal exposure|blood exposure|sexual exposure~cirrhosis|liver cancer|kidney disease~ALT|HBV DNA when indicated|fibrosis assessment|liver cancer surveillance
-cirrhosis~Cirrhosis~Xơ gan~hepatic~Cirrhosis|Xơ gan|liver cirrhosis~fatigue|jaundice|abdominal swelling|easy bruising~vomiting blood|black stools|confusion|fever with ascites~viral hepatitis|alcohol|metabolic fatty liver~kidney dysfunction|malnutrition|liver cancer~weight and ascites|mental status|liver and kidney tests|cancer surveillance
-metabolic-fatty-liver~Metabolic dysfunction-associated steatotic liver disease~Bệnh gan nhiễm mỡ liên quan chuyển hóa~hepatic~Metabolic dysfunction-associated steatotic liver disease|Bệnh gan nhiễm mỡ liên quan chuyển hóa|MASLD|NAFLD|fatty liver|gan nhiễm mỡ~often asymptomatic|fatigue|right upper abdominal discomfort~jaundice|abdominal swelling|confusion~obesity|diabetes|dyslipidemia~cardiovascular disease|sleep apnea|chronic-kidney-disease~weight|metabolic risk|liver enzymes|fibrosis risk
-gerd~Gastroesophageal reflux disease~Trào ngược dạ dày thực quản~gastrointestinal~Gastroesophageal reflux disease|Trào ngược dạ dày thực quản|GERD|acid reflux|trào ngược~heartburn|regurgitation|chronic cough~difficulty swallowing|vomiting blood|black stools|unintentional weight loss~obesity|pregnancy|hiatal hernia~asthma|sleep disturbance|esophagitis~alarm symptoms|response to treatment|weight
-inflammatory-bowel-disease~Inflammatory bowel disease~Bệnh viêm ruột~gastrointestinal~Inflammatory b
+import catalogPart1 from './diseaseCatalogData1.js';
+import catalogPart2 from './diseaseCatalogData2.js';
+import catalogPart3 from './diseaseCatalogData3.js';
+
+const RAW_CATALOG = [catalogPart1, catalogPart2, catalogPart3].join('\n');
+
+function splitList(value = '') {
+  return value.split('|').map((item) => item.trim()).filter(Boolean);
+}
+
+export const diseaseCatalog = RAW_CATALOG.split('\n').map((line) => {
+  const [id, name, nameVi, category, aliases, symptoms, redFlags, riskFactors, comorbidities, monitoring] = line.split('~');
+  return {
+    id,
+    name,
+    nameVi,
+    category,
+    aliases: [...new Set([name, nameVi, ...splitList(aliases)])],
+    symptoms: splitList(symptoms),
+    redFlags: splitList(redFlags),
+    riskFactors: splitList(riskFactors),
+    comorbidities: splitList(comorbidities),
+    monitoring: splitList(monitoring)
+  };
+});
+
+export function diseaseToDocument(item) {
+  return {
+    id: `disease:${item.id}`,
+    source: 'curated-disease-catalog',
+    sourceType: 'curated',
+    title: `${item.name} / ${item.nameVi}`,
+    content: [
+      `Condition: ${item.name} (${item.nameVi}).`,
+      `Category: ${item.category}.`,
+      item.aliases.length ? `Aliases: ${item.aliases.join(', ')}.` : '',
+      item.symptoms.length ? `Common features: ${item.symptoms.join(', ')}.` : '',
+      item.redFlags.length ? `Red flags: ${item.redFlags.join(', ')}.` : '',
+      item.riskFactors.length ? `Risk factors: ${item.riskFactors.join(', ')}.` : '',
+      item.comorbidities.length ? `Common comorbidities or interactions: ${item.comorbidities.join(', ')}.` : '',
+      item.monitoring.length ? `Monitoring domains: ${item.monitoring.join(', ')}.` : ''
+    ].filter(Boolean).join('\n'),
+    aliases: item.aliases,
+    diseaseIds: [item.id],
+    category: item.category,
+    evidenceTier: 1,
+    reviewStatus: 'curated-baseline',
+    jurisdiction: 'general',
+    sourceVersion: 'catalog-v1',
+    publishedAt: null,
+    retrievedAt: new Date().toISOString(),
+    canonicalUrl: null
+  };
+}
