@@ -4,7 +4,7 @@ const EMERGENCY_PATTERNS = [
     severity: 'emergency',
     patterns: [
       /\b(chest pain|pressure in (my|the) chest|crushing chest pain)\b/i,
-      /\b(đau ngực|tức ngực|nặng ngực)\b/i
+      /(đau ngực|tức ngực|nặng ngực)/i
     ]
   },
   {
@@ -12,7 +12,7 @@ const EMERGENCY_PATTERNS = [
     severity: 'emergency',
     patterns: [
       /\b(can(?:not|'t) breathe|difficulty breathing|shortness of breath|choking)\b/i,
-      /\b(khó thở|không thở được|nghẹt thở)\b/i
+      /(khó thở|không thở được|nghẹt thở)/i
     ]
   },
   {
@@ -20,7 +20,7 @@ const EMERGENCY_PATTERNS = [
     severity: 'emergency',
     patterns: [
       /\b(face droop|slurred speech|sudden weakness|one-sided weakness|possible stroke)\b/i,
-      /\b(méo miệng|nói đớ|yếu một bên|liệt nửa người|đột quỵ)\b/i
+      /(méo miệng|nói đớ|yếu một bên|liệt nửa người|đột quỵ)/i
     ]
   },
   {
@@ -28,7 +28,7 @@ const EMERGENCY_PATTERNS = [
     severity: 'emergency',
     patterns: [
       /\b(severe bleeding|bleeding (will not|won't) stop|coughing blood|vomiting blood)\b/i,
-      /\b(chảy máu nhiều|máu không cầm|ho ra máu|nôn ra máu)\b/i
+      /(chảy máu nhiều|máu không cầm|ho ra máu|nôn ra máu)/i
     ]
   },
   {
@@ -36,7 +36,7 @@ const EMERGENCY_PATTERNS = [
     severity: 'emergency',
     patterns: [
       /\b(unconscious|not waking up|passed out and not responding|seizure lasting)\b/i,
-      /\b(bất tỉnh|không tỉnh lại|không phản ứng|co giật kéo dài)\b/i
+      /(bất tỉnh|không tỉnh lại|không phản ứng|co giật kéo dài)/i
     ]
   },
   {
@@ -44,19 +44,19 @@ const EMERGENCY_PATTERNS = [
     severity: 'crisis',
     patterns: [
       /\b(kill myself|end my life|suicide|hurt myself|self[- ]harm)\b/i,
-      /\b(tự tử|kết liễu|muốn chết|tự làm hại bản thân)\b/i
+      /(tự tử|kết liễu|muốn chết|tự làm hại bản thân)/i
     ]
   }
 ];
 
 const NEGATION_PATTERNS = [
   /\b(no|not|never|without|deny|denies|do not|don't|does not|doesn't)\b/i,
-  /\b(không|chưa|không có|không bị|phủ nhận)\b/i
+  /(không có|không bị|chưa từng|phủ nhận)/i
 ];
 
 const INFORMATIONAL_PATTERNS = [
   /\b(what is|what are|tell me about|information about|symptoms of|definition of)\b/i,
-  /\b(là gì|thông tin về|triệu chứng của|giải thích về)\b/i
+  /(là gì|thông tin về|triệu chứng của|giải thích về)/i
 ];
 
 function hasNearbyNegation(text, matchIndex) {
@@ -89,7 +89,9 @@ export function assessMedicalSafety(input = '') {
   }
 
   const isInformational = INFORMATIONAL_PATTERNS.some((pattern) => pattern.test(text));
-  const hasFirstPersonContext = /\b(i|i'm|im|my|me|tôi|mình|em|con|cháu)\b/i.test(text);
+  const hasFirstPersonContext =
+    /\b(i|i'm|im|my|me)\b/i.test(text) ||
+    /(tôi|mình|em|con|cháu)/i.test(text);
 
   if (isInformational && !hasFirstPersonContext) {
     return { level: 'normal', matchedSignals: [] };
@@ -117,7 +119,7 @@ export function buildSafetyResponse(assessment, locale = 'en') {
 }
 
 export function detectLocale(input = '') {
-  return /[ăâđêôơưĂÂĐÊÔƠƯ]|\b(tôi|mình|em|không|đau|khó thở|triệu chứng)\b/i.test(String(input))
+  return /[ăâđêôơưĂÂĐÊÔƠƯ]|(tôi|mình|em|không|đau|khó thở|triệu chứng)/i.test(String(input))
     ? 'vi'
     : 'en';
 }
