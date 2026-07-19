@@ -14,14 +14,9 @@ function clamp(value, min, max, fallback) {
   return Number.isFinite(numeric) ? Math.min(Math.max(numeric, min), max) : fallback;
 }
 
-export async function streamOpenRouter({ messages, temperature, maxTokens }, response) {
-  if (!config.openRouter.apiKey) {
-    response.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8' });
-    response.end(JSON.stringify({ error: 'OPENROUTER_API_KEY is not configured on the server' }));
-    return;
-  }
-
-  const upstream = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
+async function openRouterResponse({ messages, temperature, maxTokens, stream }) {
+  if (!config.openRouter.apiKey) throw new Error('OPENROUTER_API_KEY is not configured on the server');
+  const response = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -34,34 +29,52 @@ export async function streamOpenRouter({ messages, temperature, maxTokens }, res
       messages: validateMessages(messages),
       temperature: clamp(temperature, 0, 1, 0.2),
       max_tokens: clamp(maxTokens, 256, 16000, 5000),
-      stream: true
+      stream
     })
   }, Math.max(config.requestTimeoutMs, 90000));
 
-  if (!upstream.ok || !upstream.body) {
-    const text = await upstream.text();
-    response.writeHead(upstream.status || 502, { 'Content-Type': 'application/json; charset=utf-8' });
-    response.end(JSON.stringify({ error: text.slice(0, 1000) || 'OpenRouter request failed' }));
-    return;
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`OpenRouter ${response.status}: ${text.slice(0, 1000) || 'request failed'}`);
   }
+  return response;
+}
 
-  response.writeHead(200, {
-    'Content-Type': 'text/event-stream; charset=utf-8',
-    'Cache-Control': 'no-cache, no-transform',
-    Connection: 'keep-alive',
-    'X-Accel-Buffering': 'no'
-  });
+export async function streamOpenRouterChunks(payload, onChunk) {
+  const response = await openRouterResponse({ ...payload, stream: true });
+  if (!response.body) throw new Error('OpenRouter returned no response body');
 
-  const reader = upstream.body.getReader();
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      response.write(value);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let fullText = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (!data || data === '[DONE]') continue;
+      try {
+        const parsed = JSON.parse(data);
+        const chunk = parsed.choices?.[0]?.delta?.content || '';
+        if (chunk) {
+          fullText += chunk;
+          onChunk?.(chunk);
+        }
+      } catch {
+        // Ignore malformed provider events while preserving the stream.
+      }
     }
-  } finally {
-    response.end();
+    if (done) break;
   }
+
+  return fullText;
 }
 
 export async function generateGoogle({ prompt, temperature, maxTokens }) {
