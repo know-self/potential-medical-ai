@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Clinical Review Console</title>
+  <style>
+    body{font-family:system-ui,sans-serif;margin:0;background:#f5f7fb;color:#172033}header{padding:16px 24px;background:#111827;color:white;display:flex;gap:12px;align-items:center}main{padding:20px;display:grid;grid-template-columns:360px 1fr;gap:18px}.panel{background:white;border:1px solid #dbe1ea;border-radius:12px;padding:16px}.queue button{display:block;width:100%;text-align:left;margin:8px 0;padding:10px;border:1px solid #dbe1ea;border-radius:8px;background:white}.queue button:hover{background:#f2f6ff}textarea,input,select{width:100%;box-sizing:border-box;padding:8px;margin:4px 0 10px}.actions{display:flex;gap:8px}.approve{background:#166534;color:white}.reject{background:#991b1b;color:white}.rollback{background:#92400e;color:white}.actions button{border:0;border-radius:8px;padding:10px 14px}.diff{display:grid;grid-template-columns:1fr 1fr;gap:12px}.diff pre{white-space:pre-wrap;max-height:420px;overflow:auto;background:#f8fafc;padding:12px;border-radius:8px}.muted{color:#64748b;font-size:13px}.badge{display:inline-block;padding:3px 8px;border-radius:999px;background:#e2e8f0;font-size:12px}@media(max-width:900px){main{grid-template-columns:1fr}.diff{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<header><strong>Clinical Review Console</strong><span class="muted">Private knowledge-plane administration</span></header>
+<main>
+  <section class="panel">
+    <label>Reviewer token</label><input id="token" type="password" autocomplete="off" />
+    <label>Reviewer identity</label><input id="reviewer" placeholder="clinician@example.org" />
+    <button id="refresh">Refresh queue</button>
+    <div id="status" class="muted"></div>
+    <div id="queue" class="queue"></div>
+  </section>
+  <section class="panel">
+    <h2 id="title">Select a review item</h2>
+    <div id="meta"></div>
+    <div class="diff">
+      <div><h3>Previous version</h3><pre id="previous"></pre></div>
+      <div><h3>Candidate version</h3><pre id="current"></pre></div>
+    </div>
+    <label>Decision reason</label><textarea id="reason" rows="4"></textarea>
+    <div class="actions">
+      <button class="approve" data-decision="approve">Approve</button>
+      <button class="reject" data-decision="reject">Reject</button>
+      <button class="rollback" id="rollback">Rollback</button>
+    </div>
+    <pre id="result"></pre>
+  </section>
+</main>
+<script>
+let selected=null;
+const auth=()=>({Authorization:`Bearer ${document.querySelector('#token').value}`,'Content-Type':'application/json'});
+async function api(path,options={}){const response=await fetch(path,{...options,headers:{...auth(),...(options.headers||{})}});const data=await response.json();if(!response.ok)throw new Error(data.error||`HTTP ${response.status}`);return data}
+function render(item){selected=item.id;document.querySelector('#title').textContent=item.title;document.querySelector('#meta').innerHTML=`<span class="badge">${item.source}</span> <span class="badge">${item.changeType}</span><p class="muted">${item.id}</p>`;const previous=item.versionHistory?.[0];document.querySelector('#previous').textContent=previous?`${previous.title}\n\n${previous.content||previous.abstract||''}`:'No previous version';document.querySelector('#current').textContent=`${item.title}\n\n${item.content||item.abstract||''}`;document.querySelector('#result').textContent=JSON.stringify(item.workflow||{},null,2)}
+async function refresh(){try{const data=await api('/admin/reviews');document.querySelector('#status').textContent=`${data.count} item(s) awaiting review`;const queue=document.querySelector('#queue');queue.innerHTML='';for(const item of data.items){const button=document.createElement('button');button.textContent=`${item.title} — ${item.source}`;button.onclick=async()=>{const detail=await api(`/admin/reviews/${encodeURIComponent(item.id)}`);render(detail.document?{...detail.document,workflow:detail.workflow}:item)};queue.appendChild(button)}}catch(error){document.querySelector('#status').textContent=error.message}}
+document.querySelector('#refresh').onclick=refresh;
+for(const button of document.querySelectorAll('[data-decision]'))button.onclick=async()=>{if(!selected)return;try{const data=await api(`/admin/reviews/${encodeURIComponent(selected)}/decision`,{method:'POST',body:JSON.stringify({decision:button.dataset.decision,reviewer:document.querySelector('#reviewer').value,reason:document.querySelector('#reason').value})});document.querySelector('#result').textContent=JSON.stringify(data,null,2);await refresh()}catch(error){document.querySelector('#result').textContent=error.message}};
+document.querySelector('#rollback').onclick=async()=>{if(!selected)return;try{const data=await api(`/admin/reviews/${encodeURIComponent(selected)}/rollback`,{method:'POST',body:JSON.stringify({reviewer:document.querySelector('#reviewer').value,reason:document.querySelector('#reason').value})});document.querySelector('#result').textContent=JSON.stringify(data,null,2);await refresh()}catch(error){document.querySelector('#result').textContent=error.message}};
+</script>
+</body>
+</html>

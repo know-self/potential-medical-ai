@@ -8,14 +8,12 @@ test('chat prompt carries freshness, evidence status, and citations', () => {
     history: [{ role: 'user', content: 'I have diabetes.' }],
     knowledge: {
       freshness: { level: 'fresh', checkedAt: '2026-07-19T00:00:00Z' },
+      localeRouting: { locale: 'en', preferredJurisdiction: 'global' },
       detectedDiseases: [{ name: 'Chronic kidney disease', nameVi: 'Bệnh thận mạn' }],
+      conflicts: [],
       results: [{
-        title: 'Example guideline',
-        source: 'official-guideline',
-        evidenceTier: 1,
-        reviewStatus: 'approved',
-        updatedAt: '2026-07-18',
-        content: 'Treatment decisions depend on kidney function.'
+        title: 'Example guideline', source: 'official-guideline', jurisdiction: 'global', evidenceTier: 1,
+        reviewStatus: 'approved', updatedAt: '2026-07-18', content: 'Treatment decisions depend on kidney function.'
       }]
     }
   });

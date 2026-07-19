@@ -8,6 +8,12 @@ function numberFromEnv(name, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+function booleanFromEnv(name, fallback = false) {
+  const value = process.env[name];
+  if (value === undefined) return fallback;
+  return value === 'true';
+}
+
 function listFromEnv(name, fallback = []) {
   const value = process.env[name];
   if (!value) return fallback;
@@ -25,11 +31,14 @@ function jsonObjectFromEnv(name, fallback = {}) {
   }
 }
 
+const dataDir = process.env.MEDICAL_DATA_DIR || path.join(here, 'data');
+
 export const config = {
   port: numberFromEnv('PORT', 8787),
   host: process.env.HOST || '0.0.0.0',
   allowedOrigins: listFromEnv('ALLOWED_ORIGINS', ['http://localhost:3000']),
   apiAdminToken: process.env.API_ADMIN_TOKEN || '',
+  reviewerToken: process.env.CLINICAL_REVIEWER_TOKEN || process.env.API_ADMIN_TOKEN || '',
   requestTimeoutMs: numberFromEnv('UPSTREAM_TIMEOUT_MS', 20000),
   rateLimitWindowMs: numberFromEnv('RATE_LIMIT_WINDOW_MS', 60000),
   rateLimitMax: numberFromEnv('RATE_LIMIT_MAX', 80),
@@ -49,9 +58,20 @@ export const config = {
     'cdc-content-services'
   ]),
 
-  dataDir: process.env.MEDICAL_DATA_DIR || path.join(here, 'data'),
-  knowledgeFile: process.env.MEDICAL_KNOWLEDGE_FILE || path.join(here, 'data', 'knowledge.json'),
-  sourceStateFile: process.env.MEDICAL_SOURCE_STATE_FILE || path.join(here, 'data', 'source-state.json'),
+  dataDir,
+  knowledgeFile: process.env.MEDICAL_KNOWLEDGE_FILE || path.join(dataDir, 'knowledge.json'),
+  sourceStateFile: process.env.MEDICAL_SOURCE_STATE_FILE || path.join(dataDir, 'source-state.json'),
+  reviewStateFile: process.env.CLINICAL_REVIEW_STATE_FILE || path.join(dataDir, 'clinical-review.json'),
+  governanceAuditFile: process.env.GOVERNANCE_AUDIT_FILE || path.join(dataDir, 'governance-audit.jsonl'),
+  sourceRegistryFile: process.env.SOURCE_REGISTRY_FILE || path.join(dataDir, 'source-registry.json'),
+  incidentFile: process.env.INCIDENT_FILE || path.join(dataDir, 'incidents.json'),
+  metricsFile: process.env.METRICS_FILE || path.join(dataDir, 'metrics.json'),
+  userDataFile: process.env.USER_DATA_FILE || path.join(dataDir, 'user-data.enc.json'),
+  privacyAuditFile: process.env.PRIVACY_AUDIT_FILE || path.join(dataDir, 'privacy-audit.jsonl'),
+  shareDataFile: process.env.SHARE_DATA_FILE || path.join(dataDir, 'shares.enc.json'),
+  uploadDirectory: process.env.UPLOAD_DIRECTORY || path.join(dataDir, 'uploads'),
+  uploadMetadataFile: process.env.UPLOAD_METADATA_FILE || path.join(dataDir, 'uploads.enc.json'),
+
   syncOnStart: process.env.SYNC_ON_START === 'true',
   syncEnabled: process.env.SYNC_ENABLED !== 'false',
   syncIntervalMinutes: numberFromEnv('SYNC_INTERVAL_MINUTES', 360),
@@ -68,6 +88,53 @@ export const config = {
     'infectious disease'
   ]),
   maxItemsPerSource: numberFromEnv('MAX_ITEMS_PER_SOURCE', 20),
+
+  governance: {
+    approvalsRequired: numberFromEnv('CLINICAL_APPROVALS_REQUIRED', 2),
+    reviewMaxAgeHours: numberFromEnv('CLINICAL_REVIEW_MAX_AGE_HOURS', 72)
+  },
+  privacy: {
+    signingKey: process.env.USER_SESSION_SIGNING_KEY || '',
+    encryptionKey: process.env.USER_DATA_ENCRYPTION_KEY || '',
+    bootstrapToken: process.env.USER_BOOTSTRAP_TOKEN || '',
+    sessionHours: numberFromEnv('USER_SESSION_HOURS', 12),
+    retentionDays: numberFromEnv('USER_DATA_RETENTION_DAYS', 90)
+  },
+  sharing: {
+    defaultExpiryMinutes: numberFromEnv('SHARE_DEFAULT_EXPIRY_MINUTES', 60),
+    maxExpiryMinutes: numberFromEnv('SHARE_MAX_EXPIRY_MINUTES', 10080)
+  },
+  uploads: {
+    maxBytes: numberFromEnv('UPLOAD_MAX_BYTES', 10 * 1024 * 1024),
+    allowedMimeTypes: listFromEnv('UPLOAD_ALLOWED_MIME_TYPES', [
+      'text/plain',
+      'application/json',
+      'application/pdf',
+      'image/png',
+      'image/jpeg'
+    ]),
+    requireMalwareScan: booleanFromEnv('UPLOAD_REQUIRE_MALWARE_SCAN', false),
+    malwareScannerUrl: process.env.MALWARE_SCANNER_URL || '',
+    extractorUrl: process.env.DOCUMENT_EXTRACTOR_URL || '',
+    retentionDays: numberFromEnv('UPLOAD_RETENTION_DAYS', 30),
+    medicalImageAnalysisEnabled: booleanFromEnv('MEDICAL_IMAGE_ANALYSIS_ENABLED', false)
+  },
+  mcpHttp: {
+    enabled: booleanFromEnv('MCP_HTTP_ENABLED', false),
+    port: numberFromEnv('MCP_HTTP_PORT', 8791),
+    host: process.env.MCP_HTTP_HOST || '127.0.0.1',
+    allowedHosts: listFromEnv('MCP_HTTP_ALLOWED_HOSTS', ['127.0.0.1', 'localhost']),
+    bearerToken: process.env.MCP_HTTP_BEARER_TOKEN || '',
+    syncBearerToken: process.env.MCP_HTTP_SYNC_BEARER_TOKEN || '',
+    allowSync: booleanFromEnv('MCP_HTTP_ALLOW_SYNC', false)
+  },
+  capacity: {
+    tenantRequestsPerHour: numberFromEnv('TENANT_REQUESTS_PER_HOUR', 120),
+    tenantCharactersPerDay: numberFromEnv('TENANT_CHARACTERS_PER_DAY', 500000),
+    cacheTtlMinutes: numberFromEnv('MODEL_CACHE_TTL_MINUTES', 30),
+    circuitFailureThreshold: numberFromEnv('MODEL_CIRCUIT_FAILURE_THRESHOLD', 3),
+    circuitResetSeconds: numberFromEnv('MODEL_CIRCUIT_RESET_SECONDS', 60)
+  },
 
   openRouter: {
     apiKey: process.env.OPENROUTER_API_KEY || '',
@@ -91,6 +158,10 @@ export const config = {
     who: listFromEnv('WHO_FEED_URLS'),
     nice: listFromEnv('NICE_FEED_URLS'),
     vietnamMoh: listFromEnv('VIETNAM_MOH_FEED_URLS')
+  },
+  snomed: {
+    baseUrl: String(process.env.SNOMED_FHIR_BASE_URL || '').replace(/\/$/, ''),
+    bearerToken: process.env.SNOMED_BEARER_TOKEN || ''
   },
   icd: {
     clientId: process.env.WHO_ICD_CLIENT_ID || '',

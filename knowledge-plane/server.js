@@ -1,17 +1,28 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
 import http from 'node:http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { config } from '../server/config.js';
 import {
+  clinicalGovernance,
   getDisease,
   getKnowledgeStatus,
   initializeKnowledgePlane,
   listDiseases,
+  observability,
+  resolveSnomedTerm,
+  resolveTerminology,
   searchKnowledge,
+  sourceRegistry,
   synchronizeKnowledge
 } from './service.js';
 
-function json(response, status, payload) {
-  response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+const root = path.dirname(fileURLToPath(import.meta.url));
+const reviewConsolePath = path.join(root, '..', 'admin', 'review-console.html');
+
+function json(response, status, payload, headers = {}) {
+  response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...headers });
   response.end(JSON.stringify(payload));
 }
 
@@ -23,7 +34,14 @@ async function readJson(request, maxBytes = 250_000) {
     if (size > maxBytes) throw new Error('Request body too large');
     chunks.push(chunk);
   }
-  return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+  if (!chunks.length) return {};
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch {
+    const error = new Error('Invalid JSON body');
+    error.statusCode = 400;
+    throw error;
+  }
 }
 
 function safeTokenEqual(actual = '', expected = '') {
@@ -33,20 +51,43 @@ function safeTokenEqual(actual = '', expected = '') {
   return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
 
-function isAdmin(request) {
+function bearer(request) {
   const header = String(request.headers.authorization || '');
-  return safeTokenEqual(header.startsWith('Bearer ') ? header.slice(7) : '', config.apiAdminToken);
+  return header.startsWith('Bearer ') ? header.slice(7) : '';
+}
+
+function isAdmin(request) {
+  return safeTokenEqual(bearer(request), config.apiAdminToken);
+}
+
+function isReviewer(request) {
+  const token = bearer(request);
+  return safeTokenEqual(token, config.reviewerToken) || safeTokenEqual(token, config.apiAdminToken);
+}
+
+function requireRole(request, role) {
+  const allowed = role === 'reviewer' ? isReviewer(request) : isAdmin(request);
+  if (!allowed) {
+    const error = new Error(`${role === 'reviewer' ? 'Reviewer' : 'Administrator'} token required`);
+    error.statusCode = 401;
+    throw error;
+  }
+}
+
+function hostnameAllowed(request) {
+  const hostHeader = String(request.headers.host || '');
+  const hostname = hostHeader.replace(/^\[/, '').replace(/\].*$/, '').split(':')[0];
+  return config.knowledgeAllowedHosts.includes('*') || config.knowledgeAllowedHosts.includes(hostname);
 }
 
 export function createKnowledgePlaneServer() {
   return http.createServer(async (request, response) => {
-    const hostHeader = String(request.headers.host || '');
-    const hostname = hostHeader.replace(/^\[/, '').replace(/\].*$/, '').split(':')[0];
-    if (!config.knowledgeAllowedHosts.includes('*') && !config.knowledgeAllowedHosts.includes(hostname)) {
+    if (!hostnameAllowed(request)) {
       json(response, 421, { error: 'Host not allowed' });
       return;
     }
-    const url = new URL(request.url || '/', `http://${hostHeader || 'localhost'}`);
+    const hostHeader = String(request.headers.host || 'localhost');
+    const url = new URL(request.url || '/', `http://${hostHeader}`);
 
     try {
       if (request.method === 'GET' && url.pathname === '/health') {
@@ -60,14 +101,41 @@ export function createKnowledgePlaneServer() {
         return;
       }
 
+      if (request.method === 'GET' && url.pathname === '/public/status') {
+        const status = getKnowledgeStatus();
+        json(response, 200, {
+          service: 'medical-knowledge-plane',
+          freshness: status.freshness,
+          updatedAt: status.updatedAt,
+          incidents: observability.incidents({ publicOnly: true }).filter((item) => item.status !== 'resolved').slice(0, 20)
+        });
+        return;
+      }
+
       if (request.method === 'GET' && url.pathname === '/search') {
         const result = searchKnowledge(url.searchParams.get('q') || '', {
           limit: url.searchParams.get('limit') || 8,
           sources: url.searchParams.getAll('source'),
           maxEvidenceTier: url.searchParams.get('maxEvidenceTier') || 4,
-          includeClinicalReview: url.searchParams.get('includeClinicalReview') === 'true'
+          includeClinicalReview: url.searchParams.get('includeClinicalReview') === 'true',
+          locale: url.searchParams.get('locale') || 'auto'
         });
         json(response, 200, result);
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/terminology') {
+        json(response, 200, resolveTerminology(url.searchParams.get('q') || '', {
+          locale: url.searchParams.get('locale') || 'auto',
+          limit: Number(url.searchParams.get('limit')) || 10
+        }));
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/terminology/snomed') {
+        json(response, 200, await resolveSnomedTerm(url.searchParams.get('q') || '', {
+          limit: Number(url.searchParams.get('limit')) || 10
+        }));
         return;
       }
 
@@ -84,11 +152,101 @@ export function createKnowledgePlaneServer() {
         return;
       }
 
+      if (request.method === 'GET' && url.pathname === '/metrics') {
+        requireRole(request, 'admin');
+        response.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' });
+        response.end(observability.prometheus());
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/admin/review-console') {
+        const html = await fs.readFile(reviewConsolePath);
+        response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+        response.end(html);
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/admin/reviews') {
+        requireRole(request, 'reviewer');
+        const items = clinicalGovernance.queue();
+        json(response, 200, { items, count: items.length });
+        return;
+      }
+
+      const reviewMatch = url.pathname.match(/^\/admin\/reviews\/([^/]+)$/);
+      if (request.method === 'GET' && reviewMatch) {
+        requireRole(request, 'reviewer');
+        const result = clinicalGovernance.review(decodeURIComponent(reviewMatch[1]));
+        json(response, result ? 200 : 404, result || { error: 'Review item not found' });
+        return;
+      }
+
+      const decisionMatch = url.pathname.match(/^\/admin\/reviews\/([^/]+)\/decision$/);
+      if (request.method === 'POST' && decisionMatch) {
+        requireRole(request, 'reviewer');
+        const body = await readJson(request);
+        json(response, 200, await clinicalGovernance.decide(decodeURIComponent(decisionMatch[1]), body));
+        return;
+      }
+
+      const rollbackMatch = url.pathname.match(/^\/admin\/reviews\/([^/]+)\/rollback$/);
+      if (request.method === 'POST' && rollbackMatch) {
+        requireRole(request, 'reviewer');
+        const body = await readJson(request);
+        json(response, 200, await clinicalGovernance.rollback(decodeURIComponent(rollbackMatch[1]), body));
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/admin/audit') {
+        requireRole(request, 'reviewer');
+        json(response, 200, { entries: await clinicalGovernance.audit({ limit: Number(url.searchParams.get('limit')) || 200 }) });
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/admin/sources') {
+        requireRole(request, 'admin');
+        json(response, 200, sourceRegistry.list());
+        return;
+      }
+
+      const sourceMatch = url.pathname.match(/^\/admin\/sources\/([^/]+)$/);
+      if (request.method === 'PATCH' && sourceMatch) {
+        requireRole(request, 'admin');
+        const body = await readJson(request);
+        json(response, 200, await sourceRegistry.update(decodeURIComponent(sourceMatch[1]), body, body.actor || 'admin'));
+        return;
+      }
+
+      const sourceApprovalMatch = url.pathname.match(/^\/admin\/sources\/([^/]+)\/approve$/);
+      if (request.method === 'POST' && sourceApprovalMatch) {
+        requireRole(request, 'reviewer');
+        const body = await readJson(request);
+        json(response, 200, await sourceRegistry.approve(decodeURIComponent(sourceApprovalMatch[1]), body));
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/admin/incidents') {
+        requireRole(request, 'admin');
+        json(response, 200, { incidents: observability.incidents() });
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/admin/incidents') {
+        requireRole(request, 'admin');
+        json(response, 201, await observability.createIncident(await readJson(request)));
+        return;
+      }
+
+      const incidentMatch = url.pathname.match(/^\/admin\/incidents\/([^/]+)$/);
+      if (request.method === 'PATCH' && incidentMatch) {
+        requireRole(request, 'admin');
+        const body = await readJson(request);
+        json(response, 200, await observability.updateIncident(decodeURIComponent(incidentMatch[1]), body, body.actor || 'admin'));
+        return;
+      }
+
       if (request.method === 'POST' && url.pathname === '/sync') {
-        if (!config.apiAdminToken || !isAdmin(request)) {
-          json(response, 401, { error: 'Administrator token required' });
-          return;
-        }
+        requireRole(request, 'admin');
         if (!config.syncEnabled) {
           json(response, 409, { error: 'Knowledge synchronization is disabled' });
           return;

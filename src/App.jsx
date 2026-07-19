@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import ChatHeader from './components/ChatHeader';
+import AssistantControlPanel from './components/AssistantControlPanel';
 import ChatInput from './components/ChatInput';
 import ChatMessage from './components/ChatMessage';
 import ChatSidebar from './components/ChatSidebar';
@@ -20,6 +21,9 @@ function App() {
   const [theme, setThemeState] = useState('dark');
   const [isPlatformReady, setIsPlatformReady] = useState(false);
   const [exampleMessage, setExampleMessage] = useState(null);
+  const [controlPanelOpen, setControlPanelOpen] = useState(false);
+  const [sessionToken, setSessionToken] = useState(() => sessionStorage.getItem('medical-user-session') || '');
+  const [selectedAttachmentIds, setSelectedAttachmentIds] = useState([]);
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
@@ -105,7 +109,7 @@ function App() {
           if (last?.role === 'assistant') next[next.length - 1] = { ...last, content: streamingResponse };
           return next;
         });
-      });
+      }, { token: sessionToken, attachmentIds: selectedAttachmentIds, locale: 'auto' });
 
       const finalContent = result.text || streamingResponse || 'No response was generated.';
       setMessages((previous) => {
@@ -182,6 +186,12 @@ function App() {
     await loadChats();
   };
 
+  const handleSessionTokenChange = (value) => {
+    setSessionToken(value);
+    if (value) sessionStorage.setItem('medical-user-session', value);
+    else sessionStorage.removeItem('medical-user-session');
+  };
+
   const freshness = platformStatus?.knowledge?.freshness;
 
   return (
@@ -235,6 +245,23 @@ function App() {
           exampleMessage={exampleMessage}
         />
       </div>
+
+      <button
+        className="fixed top-4 right-4 z-30 px-3 py-2 rounded-lg bg-blue-700 text-white text-xs shadow-lg"
+        onClick={() => setControlPanelOpen(true)}
+      >
+        Assistant controls{selectedAttachmentIds.length ? ` (${selectedAttachmentIds.length} evidence)` : ''}
+      </button>
+
+      <AssistantControlPanel
+        open={controlPanelOpen}
+        onClose={() => setControlPanelOpen(false)}
+        token={sessionToken}
+        onTokenChange={handleSessionTokenChange}
+        messages={messages}
+        selectedAttachmentIds={selectedAttachmentIds}
+        onSelectedAttachmentIdsChange={setSelectedAttachmentIds}
+      />
 
       {connectionError && (
         <div className="fixed bottom-2 right-2 sm:bottom-4 sm:right-4 bg-red-50 border border-red-200 rounded-lg shadow-lg p-3 sm:p-4 max-w-xs sm:max-w-sm z-50">

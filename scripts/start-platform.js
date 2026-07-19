@@ -6,6 +6,10 @@ const commands = [
   { name: 'chat-gateway', command: process.execPath, args: ['server/server.js'] }
 ];
 
+if (process.env.MCP_HTTP_ENABLED === 'true') {
+  commands.push({ name: 'mcp-http', command: process.execPath, args: ['knowledge-plane/mcp-http.js'] });
+}
+
 if (includeWeb) {
   commands.push({
     name: 'web',

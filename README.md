@@ -1,105 +1,92 @@
 # Potential Medical AI
 
-Evidence-aware healthcare assistant with a **separate medical knowledge control plane**, server-side model gateway, deterministic emergency guardrails, source freshness policies, versioned evidence, and an MCP interface.
+A **conversational medical assistant platform** with streaming chat, persistent conversations, governed realtime evidence, secure collaboration, multimodal evidence upload, privacy controls, and MCP access for trusted agents.
 
-> This project provides general educational information. It is not a diagnostic, prescribing, emergency-response, or clinical decision system.
+> This project provides general educational information. It is not a diagnostic, prescribing, emergency-response, or regulated clinical decision system.
 
-## Architecture
+## The product is still a chat assistant
+
+The React chat experience remains the primary product surface. Users ask questions, maintain conversations, attach evidence, add confirmed health context, and receive source-grounded responses. The supporting services exist to make that assistant safer and more reliable:
 
 ```text
 Official APIs / feeds
         │
         ▼
 Knowledge Control Plane :8790
-  - scheduled connectors
+  - scheduled source connectors
   - versioning and provenance
-  - freshness SLOs
-  - clinical review queue
-  - REST API
-  - MCP tools/resources
+  - freshness SLOs and fail-closed policy
+  - clinical review console and audit chain
+  - terminology, conflicts, observability
+  - private REST and MCP interfaces
         │
         ▼
 Medical Chat Gateway :8787
-  - emergency safety gate
-  - knowledge retrieval
-  - evidence-grounded model prompt
-  - citations
+  - server-side emergency gate
+  - consented patient context and uploads
+  - governed knowledge retrieval
+  - evidence-grounded model routing
+  - citations, privacy, sharing, capacity controls
         │
         ▼
-React frontend :3000
-  - presentation and chat history only
-  - no model keys
-  - no local RAG, symptom analysis, or clinical fallback
+React Chat Assistant :3000
+  - streaming conversations and history
+  - assistant controls for context, uploads, timeline and sharing
+  - no model keys, local RAG, local clinical reasoning or medical fallback
 ```
 
-MCP is the standardized access layer for agents. It does **not** make sources current by itself. Freshness comes from official APIs/feeds, scheduled synchronization, source timestamps, version hashes, and a fail-closed policy.
+MCP is a standardized interface for trusted agents. It is not the update engine. Source freshness comes from official APIs/feeds, scheduled synchronization, source timestamps, hashes, review states, and freshness policies.
 
-## Freshness policy
-
-- PubMed, ClinicalTrials.gov, openFDA, CDC, DailyMed, WHO ICD-11, and configured official guideline feeds are synchronized by the knowledge plane.
-- Each source has a maximum-age SLO.
-- Required stale or never-synchronized sources make the knowledge plane unusable when `KNOWLEDGE_FAIL_CLOSED=true`.
-- High-risk changes involving dose, contraindications, pregnancy, renal/hepatic impairment, emergencies, warnings, or mortality are excluded from normal retrieval until clinical review.
-- Research papers, trial registrations, and adverse-event reports remain evidence candidates; they are not automatically promoted into treatment recommendations.
-
-No system can guarantee that every source is error-free or instantaneously current. This platform instead makes staleness visible and blocks medical answers when required freshness cannot be proven.
-
-## Product roadmap
-
-The roadmap replaces the original “To-do in the upcoming” list. Features are ordered by patient-safety value rather than visual novelty.
+## Implemented roadmap
 
 ### P0 — Clinical governance and reliability
 
-- [ ] **Clinical review console** — side-by-side source diff, reviewer identity, dual approval for high-risk changes, rejection reasons, rollback, and immutable audit history.
-- [ ] **Medical evaluation gate in CI** — clinician-reviewed Vietnamese and English cases covering emergencies, contraindications, pregnancy, renal/hepatic impairment, hallucinations, missing citations, and prompt injection. Releases fail when safety or grounding scores regress.
-- [ ] **Freshness and connector observability** — dashboards and alerts for stale required sources, sync failures, review-queue age, citation coverage, model latency, and error rate.
-- [ ] **Source and jurisdiction registry** — license terms, authority level, country applicability, effective date, superseded guidance, and permitted reuse for every source.
-- [ ] **Privacy control plane** — explicit consent, encrypted storage, configurable retention, export/delete workflows, secret rotation, access logs, and separation of health data from product analytics.
+- [x] **Clinical review console** — side-by-side versions, named reviewer decisions, configurable dual approval, rejection, rollback, and a tamper-evident audit chain.
+- [x] **Medical evaluation gate in CI** — Vietnamese and English emergency, grounding, conflict, prompt-injection and translation regression suites.
+- [x] **Freshness and connector observability** — freshness states, persistent metrics, Prometheus output, sync-error incidents and public degraded status.
+- [x] **Source and jurisdiction registry** — authority, jurisdiction, evidence tier, guidance eligibility, license-validation status and operator approval.
+- [x] **Privacy control plane foundation** — explicit consent, encrypted health data, retention, export/delete, access auditing and encryption-key rotation.
 
 ### P1 — Safer clinical collaboration
 
-- [ ] **Secure clinician sharing** — expiring and revocable signed links, scoped transcript access, patient consent, optional redaction, access audit, and no raw chat IDs in public URLs.
-- [ ] **Structured patient context** — age range, medications, allergies, diagnoses, pregnancy status, kidney/liver considerations, and user-confirmed corrections. Context must never silently become a diagnosis.
-- [ ] **Longitudinal health timeline** — user-controlled summaries of symptoms, medications, measurements, and source-backed changes across conversations.
-- [ ] **Clinician export** — printable evidence summary and optional FHIR-compatible export after terminology and privacy validation.
+- [x] **Secure clinician sharing** — random expiring/revocable links, scoped transcript payloads, consent checks, optional redaction and access auditing.
+- [x] **Structured patient context** — user-confirmed age range, medicines, allergies, reported diagnoses, pregnancy status and locale.
+- [x] **Longitudinal health timeline** — encrypted user-controlled timeline events with explicit confirmation.
+- [x] **Clinician export foundation** — printable HTML evidence summary and preliminary FHIR-compatible JSON bundle.
 
 ### P1 — Multimodal evidence ingestion
 
-- [ ] **Secure document and image upload** — isolated object storage, file-type validation, malware scanning, size limits, retention controls, and de-identification before analysis.
-- [ ] **Evidence-preserving extraction** — PDF/image text extraction with page-level citations, confidence indicators, and a clear distinction between source text and model interpretation.
-- [ ] **Laboratory-result explanation** — unit-aware reference ranges, age/sex/context caveats, abnormal-value highlighting, and explicit prohibition on standalone diagnosis.
-- [ ] **Medical image boundary** — educational description only unless a separately validated regulated imaging workflow is introduced.
+- [x] **Secure document and image upload foundation** — encrypted storage, MIME allowlist, signature validation, size/retention limits and de-identification.
+- [x] **Evidence-preserving extraction** — line/page citations and confidence metadata; external malware scanner and document extractor adapters are supported.
+- [x] **Laboratory-result explanation boundary** — compares a numeric result only against a supplied reference interval and never diagnoses.
+- [x] **Medical image boundary** — images remain non-diagnostic unless a separately validated imaging service is introduced.
 
 ### P1 — Multilingual and terminology quality
 
-- [ ] **Vietnamese-first terminology layer** — ICD-11/SNOMED mappings, aliases, abbreviations, accent-insensitive matching, and preservation of medication names, units, and doses.
-- [ ] **Locale-aware evidence routing** — prioritize applicable Vietnam Ministry of Health guidance while showing international sources and jurisdiction conflicts explicitly.
-- [ ] **Translation quality evaluation** — regression tests for negation, emergency language, dosage expressions, pregnancy terms, and ambiguous symptom descriptions.
+- [x] **Vietnamese-first terminology layer** — aliases, abbreviations, accent-insensitive matching and medication/dose/unit preservation.
+- [x] **Locale-aware evidence routing** — Vietnamese requests prefer Vietnam-applicable evidence while jurisdiction conflicts remain visible.
+- [x] **Translation quality evaluation** — regression checks for negation, emergency wording, doses, pregnancy and ambiguous terminology.
+- [x] **Terminology adapters** — existing WHO ICD-11 connector plus an optional licensed SNOMED FHIR terminology endpoint.
 
 ### P2 — Platform and agent capabilities
 
-- [ ] **Authenticated remote MCP** — Streamable HTTP transport, OAuth/service identity, private networking, host validation, per-tool authorization, rate limits, and read-only defaults.
-- [ ] **Model routing and fallback policy** — choose models by task, evidence sensitivity, latency, cost, and measured evaluation quality; never fall back to an ungrounded medical answer.
-- [ ] **Evidence conflict resolver** — surface disagreements between current guidelines, labels, jurisdictions, and newer research instead of blending them into one unsupported recommendation.
-- [ ] **Cost and capacity controls** — response budgets, caching of immutable evidence, queueing, provider circuit breakers, and per-tenant quotas.
-- [ ] **Public status and incident workflow** — knowledge freshness status, provider outages, incident notes, and safe degraded-mode messaging.
+- [x] **Authenticated remote MCP foundation** — Streamable HTTP, service identities, host validation, separate read/sync authorization and read-only defaults.
+- [x] **Model routing and grounded fallback policy** — task/sensitivity routing, shared evidence prompt and no ungrounded medical fallback.
+- [x] **Evidence conflict resolver** — surfaces jurisdiction and recommendation disagreements rather than silently blending them.
+- [x] **Cost and capacity controls** — tenant quotas, response cache and provider circuit breakers.
+- [x] **Public status and incident workflow** — safe public status, private incident management and metrics.
 
-### Completed or superseded from the original list
+Production dependencies and limitations are documented in [Roadmap implementation matrix](docs/ROADMAP_IMPLEMENTATION.md). In particular, real identity-provider integration, clinician sign-off, licensed terminology services, production malware scanning/extraction and external monitoring still require deployment-specific services.
 
-- [x] **Move AI keys and prompts out of the client bundle** — completed with the server-side gateway and browser-boundary CI guard.
-- [x] **Separate backend middleware and knowledge processing** — completed with the chat gateway and private knowledge control plane.
-- [x] **Realtime streaming responses** — retained through the gateway stream endpoint.
-- [~] **Chat URL sharing** — superseded by secure, expiring clinician-sharing links; raw unique IDs are intentionally rejected.
-- [~] **“Deep thinking” for uploads** — replaced by evidence-preserving multimodal ingestion, citations, extraction confidence, and safety boundaries.
-- [~] **Multilanguage responses** — basic English/Vietnamese support exists; terminology mapping and formal quality evaluation remain planned.
+## Freshness policy
 
-### Explicit non-goals
+- PubMed, ClinicalTrials.gov, openFDA, CDC, DailyMed, WHO ICD-11 and configured official guideline feeds are synchronized by the knowledge plane.
+- Each source has a maximum-age SLO.
+- Required stale, failed or never-synchronized sources make knowledge unusable when `KNOWLEDGE_FAIL_CLOSED=true`.
+- High-risk changes involving dose, contraindications, pregnancy, renal/hepatic impairment, emergencies, warnings or mortality stay outside normal retrieval until review.
+- Research papers, trials and adverse-event reports remain evidence candidates; they are never automatically promoted into treatment guidance.
 
-- No autonomous diagnosis or prescribing.
-- No automatic promotion of a new paper, trial, adverse-event report, or model output into treatment guidance.
-- No public access to the knowledge control plane.
-- No browser-side medical fallback when the gateway or required evidence sources are unavailable.
-- No patient or clinician sharing through guessable identifiers.
+No software can prove that an upstream medical publisher is instantaneously current or error-free. This platform makes freshness explicit and stops grounded answer generation when required freshness cannot be demonstrated.
 
 ## Local development
 
@@ -109,17 +96,23 @@ npm install
 npm run dev
 ```
 
-`npm run dev` starts the knowledge plane, chat gateway, and Vite frontend. Individual services can also be started separately:
+`npm run dev` starts the knowledge plane, chat gateway and Vite frontend. Individual processes:
 
 ```bash
 npm run start:knowledge
 npm run start:gateway
 npm run dev:web
+npm run mcp:knowledge       # local read-only stdio MCP
+npm run start:mcp-http      # authenticated remote MCP when enabled
+```
+
+The existing optional JSON chat-history service can be started with:
+
+```bash
+npm run server:chat-history
 ```
 
 ## Production
-
-Build the frontend, then run the two backend processes as separate services:
 
 ```bash
 npm install
@@ -128,63 +121,44 @@ npm run start:knowledge
 npm run start:gateway
 ```
 
-The gateway can serve the built React application from `dist/`. In production, place the knowledge plane on a private network and expose only the gateway publicly.
+Keep the knowledge plane on a private network and expose only the gateway. The gateway may serve the built React application from `dist/`.
 
-## MCP knowledge server
+Minimum production configuration includes strong independent values for model credentials, `API_ADMIN_TOKEN`, `CLINICAL_REVIEWER_TOKEN`, session signing, user-data encryption and identity-provider bootstrap. Validate source licenses before enabling feeds.
 
-Run the read-only stdio MCP server:
+## MCP knowledge access
+
+Local stdio server:
 
 ```bash
 npm run mcp:knowledge
 ```
 
-It exposes:
+Remote Streamable HTTP server is disabled by default and requires `MCP_HTTP_ENABLED=true`, a private network, host allowlist and separate read/sync bearer identities.
 
-- `search_medical_knowledge`
-- `get_medical_knowledge_status`
-- `sync_medical_sources` — disabled unless `MCP_ALLOW_SYNC=true`
-- `medical://knowledge/status`
-- `medical://disease/{diseaseId}`
-- `ground_medical_answer` prompt template
+The MCP layer exposes governed knowledge search, freshness status, terminology resolution, source registry and read-only clinical review information. Source synchronization remains disabled unless explicitly authorized.
 
-The MCP server reads from the same versioned knowledge store as the REST control plane. Sync remains operator-controlled and read-only by default.
-
-## Synchronization
-
-```bash
-npm run sync:knowledge
-npm run sync:knowledge -- pubmed clinicaltrials.gov
-```
-
-Protected knowledge-plane trigger:
-
-```bash
-curl -X POST http://localhost:8790/sync \
-  -H "Authorization: Bearer $API_ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"sources":["pubmed","clinicaltrials.gov"]}'
-```
-
-## Endpoints
+## Main endpoints
 
 ### Knowledge control plane — private
 
-- `GET /health`
-- `GET /status`
-- `GET /search?q=...&limit=...`
-- `GET /diseases`
-- `GET /diseases/:id`
-- `POST /sync` — administrator token required
+- `GET /health`, `/status`, `/public/status`
+- `GET /search`, `/terminology`, `/terminology/snomed`, `/diseases`, `/diseases/:id`
+- `GET /admin/review-console`, `/admin/reviews`, `/admin/audit`
+- `POST /admin/reviews/:id/decision`, `/admin/reviews/:id/rollback`
+- `GET/PATCH /admin/sources/:id`, `POST /admin/sources/:id/approve`
+- `GET/POST/PATCH /admin/incidents...`, `GET /metrics`
+- `POST /sync`
 
-### Chat gateway — public
+### Chat gateway — public surface
 
-- `GET /api/health`
-- `GET /api/knowledge/status`
-- `GET /api/knowledge/search?q=...&limit=...`
-- `GET /api/knowledge/diseases`
+- `GET /api/health`, `/api/status`
+- `GET /api/knowledge/status`, `/api/knowledge/search`, `/api/knowledge/terminology`, `/api/knowledge/diseases`
 - `POST /api/chat/stream`
+- Privacy/context: `/api/privacy/session`, `/api/privacy/me`, `/api/privacy/consent`, `/api/privacy/context`, `/api/privacy/timeline`, `/api/privacy/export`
+- Sharing: `/api/shares`, `/api/shares/public/:token`
+- Evidence: `/api/uploads`, `/api/uploads/:id`, `/api/labs/explain`, `/api/images/boundary`
 
-Direct model endpoints and browser-side clinical orchestration are intentionally not exposed.
+Direct provider endpoints and browser-side clinical orchestration are intentionally not exposed.
 
 ## Validation
 
@@ -194,8 +168,23 @@ npm run build
 npm run check
 ```
 
-## Clinical governance before real patient use
+`npm test` runs Node tests, medical safety/grounding evaluations, translation evaluations and a browser-boundary guard that prevents local clinical orchestration from returning to `App.jsx`.
 
-A real-patient deployment still requires clinician-reviewed evaluation datasets, source-license validation, reviewer identities and approvals, encrypted patient-data controls, consent and retention policies, immutable audit logs, rollback, penetration testing, and applicable legal/regulatory review.
+## Explicit non-goals
 
-See [docs/KNOWLEDGE_CONTROL_PLANE.md](docs/KNOWLEDGE_CONTROL_PLANE.md) and [docs/MEDICAL_KNOWLEDGE_PLATFORM.md](docs/MEDICAL_KNOWLEDGE_PLATFORM.md).
+- No autonomous diagnosis or prescribing.
+- No automatic promotion of a paper, trial, adverse-event report or model output into treatment guidance.
+- No public knowledge-control-plane access.
+- No browser-side medical fallback when the gateway or required evidence is unavailable.
+- No patient/clinician sharing through guessable chat identifiers.
+- No claim that preliminary FHIR output is production-interoperable without terminology, conformance and privacy validation.
+
+## Before real-patient use
+
+A real-patient deployment still requires clinician-reviewed evaluation datasets and release approval, validated source licenses, verified reviewer identities, an external identity provider, immutable centralized audit retention, production KMS/HSM integration, consent and data-governance review, penetration testing, disaster recovery, rollback exercises and applicable legal/regulatory assessment.
+
+See:
+
+- [Knowledge control plane](docs/KNOWLEDGE_CONTROL_PLANE.md)
+- [Roadmap implementation matrix](docs/ROADMAP_IMPLEMENTATION.md)
+- [Medical knowledge platform](docs/MEDICAL_KNOWLEDGE_PLATFORM.md)
