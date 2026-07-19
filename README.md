@@ -1,87 +1,133 @@
 # Potential Medical AI
 
-Evidence-aware healthcare assistant with emergency guardrails, server-side model credentials, a versioned medical knowledge store, multidisciplinary disease profiles, citations, and scheduled official-source synchronization.
+Evidence-aware healthcare assistant with a **separate medical knowledge control plane**, server-side model gateway, deterministic emergency guardrails, source freshness policies, versioned evidence, and an MCP interface.
 
 > This project provides general educational information. It is not a diagnostic, prescribing, emergency-response, or clinical decision system.
 
-## What changed in v2
+## Architecture
 
-- Model API keys moved from the React bundle to a backend gateway.
-- Deterministic emergency and crisis detection runs before model calls.
-- A versioned knowledge layer records source, jurisdiction, publication/update dates, evidence tier, review status, and previous versions.
-- 40+ structured disease and comorbidity profiles cover cardiovascular, endocrine, kidney, respiratory, infectious, liver, gastrointestinal, neurologic, mental-health, autoimmune, oncology, hematology, obstetric, metabolic, and dermatology domains.
-- Near-realtime connectors support PubMed, ClinicalTrials.gov, openFDA recalls, CDC content, DailyMed labels, WHO ICD-11, and configurable official WHO/NICE/Vietnam Ministry of Health feeds.
-- High-risk changes involving dose, contraindications, pregnancy, kidney/liver impairment, emergencies, warnings, or mortality are routed to clinical review.
-- RAG results are supplied to both models and returned with evidence citations.
-- Local symptom analytics no longer sends conversation data to a separate model.
-- Node tests and GitHub Actions validate the safety, parser, versioning, search, and build paths.
+```text
+Official APIs / feeds
+        │
+        ▼
+Knowledge Control Plane :8790
+  - scheduled connectors
+  - versioning and provenance
+  - freshness SLOs
+  - clinical review queue
+  - REST API
+  - MCP tools/resources
+        │
+        ▼
+Medical Chat Gateway :8787
+  - emergency safety gate
+  - knowledge retrieval
+  - evidence-grounded model prompt
+  - citations
+        │
+        ▼
+React frontend :3000
+  - presentation and chat history only
+  - no model keys
+  - no local RAG, symptom analysis, or clinical fallback
+```
 
-## Realtime model
+MCP is the standardized access layer for agents. It does **not** make sources current by itself. Freshness comes from official APIs/feeds, scheduled synchronization, source timestamps, version hashes, and a fail-closed policy.
 
-The platform uses **near-realtime synchronization**, not uncontrolled instant publishing:
+## Freshness policy
 
-1. Connectors poll official sources.
-2. Documents are normalized and hashed.
-3. New versions are stored with provenance.
-4. High-risk changes are marked `clinical-review-required`.
-5. Chat retrieval uses the latest locally available version and exposes its status.
+- PubMed, ClinicalTrials.gov, openFDA, CDC, DailyMed, WHO ICD-11, and configured official guideline feeds are synchronized by the knowledge plane.
+- Each source has a maximum-age SLO.
+- Required stale or never-synchronized sources make the knowledge plane unusable when `KNOWLEDGE_FAIL_CLOSED=true`.
+- High-risk changes involving dose, contraindications, pregnancy, renal/hepatic impairment, emergencies, warnings, or mortality are excluded from normal retrieval until clinical review.
+- Research papers, trial registrations, and adverse-event reports remain evidence candidates; they are not automatically promoted into treatment recommendations.
 
-Research papers and trial registrations are evidence candidates. They are not automatically converted into treatment recommendations.
+No system can guarantee that every source is error-free or instantaneously current. This platform instead makes staleness visible and blocks medical answers when required freshness cannot be proven.
 
 ## Local development
 
 ```bash
 cp env.example .env
 npm install
+npm run dev
 ```
 
-Run the services in separate terminals:
+`npm run dev` starts the knowledge plane, chat gateway, and Vite frontend. Individual services can also be started separately:
 
 ```bash
-npm run server       # Medical API, model gateway, knowledge store, production static server
-npm run server:chat  # Existing JSON chat-history service on port 3001
-npm run dev          # React/Vite frontend on port 3000
+npm run start:knowledge
+npm run start:gateway
+npm run dev:web
 ```
 
-Vite proxies `/api` to `http://localhost:8787` by default.
-
 ## Production
+
+Build the frontend, then run the two backend processes as separate services:
 
 ```bash
 npm install
 npm run build
-npm start
+npm run start:knowledge
+npm run start:gateway
 ```
 
-`npm start` serves the API and the built React application from `dist/`.
+The gateway can serve the built React application from `dist/`. In production, place the knowledge plane on a private network and expose only the gateway publicly.
 
-## Knowledge synchronization
+## MCP knowledge server
+
+Run the read-only stdio MCP server:
+
+```bash
+npm run mcp:knowledge
+```
+
+It exposes:
+
+- `search_medical_knowledge`
+- `get_medical_knowledge_status`
+- `sync_medical_sources` — disabled unless `MCP_ALLOW_SYNC=true`
+- `medical://knowledge/status`
+- `medical://disease/{diseaseId}`
+- `ground_medical_answer` prompt template
+
+The MCP server reads from the same versioned knowledge store as the REST control plane. Sync remains operator-controlled and read-only by default.
+
+## Synchronization
 
 ```bash
 npm run sync:knowledge
 npm run sync:knowledge -- pubmed clinicaltrials.gov
 ```
 
-Protected HTTP trigger:
+Protected knowledge-plane trigger:
 
 ```bash
-curl -X POST http://localhost:8787/api/knowledge/sync \
+curl -X POST http://localhost:8790/sync \
   -H "Authorization: Bearer $API_ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"sources":["pubmed","clinicaltrials.gov"]}'
 ```
 
-## Core endpoints
+## Endpoints
+
+### Knowledge control plane — private
+
+- `GET /health`
+- `GET /status`
+- `GET /search?q=...&limit=...`
+- `GET /diseases`
+- `GET /diseases/:id`
+- `POST /sync` — administrator token required
+
+### Chat gateway — public
 
 - `GET /api/health`
 - `GET /api/knowledge/status`
 - `GET /api/knowledge/search?q=...&limit=...`
 - `GET /api/knowledge/diseases`
-- `GET /api/knowledge/diseases/:id`
-- `POST /api/safety/assess`
-- `POST /api/models/openrouter/stream`
-- `POST /api/models/google/generate`
-- `POST /api/knowledge/sync` — administrator token required
+- `POST /api/chat/stream`
+
+Direct model endpoints and browser-side clinical orchestration are intentionally not exposed.
 
 ## Validation
 
@@ -93,6 +139,6 @@ npm run check
 
 ## Clinical governance before real patient use
 
-A production deployment still requires clinician-reviewed evaluation datasets, source-license validation, reviewer identities and approvals, encrypted patient-data controls, consent and retention policies, audit logs, rollback, penetration testing, and applicable legal/regulatory review.
+A real-patient deployment still requires clinician-reviewed evaluation datasets, source-license validation, reviewer identities and approvals, encrypted patient-data controls, consent and retention policies, immutable audit logs, rollback, penetration testing, and applicable legal/regulatory review.
 
-See [docs/MEDICAL_KNOWLEDGE_PLATFORM.md](docs/MEDICAL_KNOWLEDGE_PLATFORM.md) for architecture and operating details.
+See [docs/KNOWLEDGE_CONTROL_PLANE.md](docs/KNOWLEDGE_CONTROL_PLANE.md) and [docs/MEDICAL_KNOWLEDGE_PLATFORM.md](docs/MEDICAL_KNOWLEDGE_PLATFORM.md).
