@@ -1,33 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
 import { chromium } from 'playwright';
+import { preview as startVitePreview } from 'vite';
 
 const root = process.cwd();
 const outputDir = path.join(root, 'artifacts');
-const preview = spawn(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'preview', '--', '--host', '127.0.0.1', '--port', '4173'], {
-  cwd: root,
-  env: process.env,
-  stdio: ['ignore', 'pipe', 'pipe']
-});
-
-let previewOutput = '';
-preview.stdout.on('data', (chunk) => { previewOutput += chunk.toString(); });
-preview.stderr.on('data', (chunk) => { previewOutput += chunk.toString(); });
-
-async function waitForServer(url, timeoutMs = 30_000) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const response = await fetch(url);
-      if (response.ok) return;
-    } catch {
-      // The preview server is still starting.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  throw new Error(`Preview server did not start.\n${previewOutput}`);
-}
 
 const chats = [{
   id: 'visual-chat',
@@ -114,8 +91,7 @@ async function installMocks(page) {
   });
 
   await page.route('**/api/**', async (route) => {
-    const request = route.request();
-    const url = new URL(request.url());
+    const url = new URL(route.request().url());
     if (url.pathname === '/api/health') return json(route, health);
     if (url.pathname === '/api/status') return json(route, { status: 'operational' });
     if (url.pathname === '/api/privacy/me') return json(route, profile);
@@ -152,16 +128,22 @@ async function assertNoHorizontalOverflow(page, label) {
 }
 
 let browser;
+let previewServer;
 try {
   await fs.mkdir(outputDir, { recursive: true });
-  await waitForServer('http://127.0.0.1:4173');
+  previewServer = await startVitePreview({
+    root,
+    preview: { host: '127.0.0.1', port: 4173, strictPort: true }
+  });
   browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1440, height: 960 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
+  page.setDefaultTimeout(10_000);
   await installMocks(page);
-  await page.goto('http://127.0.0.1:4173', { waitUntil: 'networkidle' });
+  await page.goto('http://127.0.0.1:4173', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+  await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
   await page.getByText('Chest pain in a 62-year-old male', { exact: true }).click();
-  await page.getByText('Cardiac ischemia', { exact: false }).waitFor();
+  await page.getByText('Cardiac ischemia', { exact: false }).waitFor({ state: 'visible' });
   await assertNoHorizontalOverflow(page, 'desktop');
   if (!(await page.locator('.desktop-control-preview').isVisible())) throw new Error('Desktop assistant control rail is not visible');
   await page.screenshot({ path: path.join(outputDir, 'ui-desktop.png'), fullPage: false });
@@ -177,5 +159,7 @@ try {
   console.log('Visual smoke test passed: desktop and mobile screenshots captured without horizontal overflow.');
 } finally {
   await browser?.close();
-  preview.kill('SIGTERM');
+  if (previewServer?.httpServer) {
+    await new Promise((resolve) => previewServer.httpServer.close(resolve));
+  }
 }
