@@ -19,7 +19,8 @@
     "mcp:knowledge": "node knowledge-plane/mcp.js",
     "server:chat-history": "json-server --watch db.json --port 3001",
     "sync:knowledge": "node knowledge-plane/sync.js",
-    "test": "node --test",
+    "verify:browser-boundary": "node scripts/verify-no-browser-clinical-imports.js",
+    "test": "npm run verify:browser-boundary && node --test",
     "check": "npm test && npm run build",
     "security-check": "node scripts/check-security.js"
   },
