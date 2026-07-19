@@ -26,11 +26,11 @@ export async function apiRequest(path, options = {}) {
   return response.status === 204 ? null : response.json();
 }
 
-export async function streamApi(path, payload, onChunk) {
-  const response = await fetch(apiUrl(path), {
+export async function streamMedicalChat(message, history, onChunk) {
+  const response = await fetch(apiUrl('/api/chat/stream'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ message, history })
   });
   if (!response.ok || !response.body) throw new Error(await parseError(response));
 
@@ -38,43 +38,42 @@ export async function streamApi(path, payload, onChunk) {
   const decoder = new TextDecoder();
   let buffer = '';
   let fullText = '';
+  let metadata = null;
+  let streamError = null;
 
   while (true) {
     const { done, value } = await reader.read();
     buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
+    const events = buffer.split('\n\n');
+    buffer = events.pop() || '';
 
-    for (const rawLine of lines) {
-      const line = rawLine.trim();
-      if (!line.startsWith('data:')) continue;
-      const data = line.slice(5).trim();
-      if (!data || data === '[DONE]') continue;
+    for (const rawEvent of events) {
+      const dataLine = rawEvent.split('\n').find((line) => line.startsWith('data:'));
+      if (!dataLine) continue;
       try {
-        const parsed = JSON.parse(data);
-        const chunk = parsed.choices?.[0]?.delta?.content || '';
-        if (chunk) {
-          fullText += chunk;
-          onChunk?.(chunk);
+        const payload = JSON.parse(dataLine.slice(5).trim());
+        if (payload.type === 'chunk' && payload.text) {
+          fullText += payload.text;
+          onChunk?.(payload.text);
+        } else if (payload.type === 'done') {
+          metadata = payload;
+        } else if (payload.type === 'error') {
+          streamError = payload.error || 'Medical chat stream failed';
         }
       } catch {
-        // Ignore partial or non-JSON SSE lines from upstream providers.
+        // Ignore malformed events; the gateway emits a final done/error event.
       }
     }
-
     if (done) break;
   }
 
-  return fullText;
+  if (streamError && !fullText) throw new Error(streamError);
+  return { text: fullText, metadata, error: streamError };
 }
 
 export const medicalApi = {
   health: () => apiRequest('/api/health'),
   knowledgeStatus: () => apiRequest('/api/knowledge/status'),
   searchKnowledge: (query, limit = 8) => apiRequest(`/api/knowledge/search?q=${encodeURIComponent(query)}&limit=${limit}`),
-  assessSafety: (text, locale) => apiRequest('/api/safety/assess', { method: 'POST', body: JSON.stringify({ text, locale }) }),
-  generateGoogle: (prompt, options = {}) => apiRequest('/api/models/google/generate', {
-    method: 'POST',
-    body: JSON.stringify({ prompt, ...options })
-  })
+  streamChat: streamMedicalChat
 };
