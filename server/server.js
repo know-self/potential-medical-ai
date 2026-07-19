@@ -1,20 +1,14 @@
-import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { streamMedicalChat } from './chat.js';
 import { config } from './config.js';
-import { runConnectors } from './connectors/index.js';
-import { KnowledgeStore } from './knowledge/store.js';
-import { generateGoogle, streamOpenRouter } from './models.js';
-import { assessMedicalSafety, buildSafetyResponse, detectLocale } from './safety.js';
+import { knowledgePlane } from './knowledgeClient.js';
 
 const serverDirectory = path.dirname(fileURLToPath(import.meta.url));
 const staticRoot = path.join(serverDirectory, '..', 'dist');
-
-const store = new KnowledgeStore({ knowledgeFile: config.knowledgeFile, sourceStateFile: config.sourceStateFile });
 const rateBuckets = new Map();
-let syncInFlight = null;
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -30,8 +24,7 @@ const MIME_TYPES = {
 };
 
 async function serveStatic(pathname, response) {
-  let relativePath = decodeURIComponent(pathname === '/' ? '/index.html' : pathname);
-  relativePath = relativePath.replace(/^\/+/, '');
+  const relativePath = decodeURIComponent(pathname === '/' ? '/index.html' : pathname).replace(/^\/+/, '');
   const resolvedRoot = path.resolve(staticRoot);
   let filePath = path.resolve(resolvedRoot, relativePath);
   if (filePath !== resolvedRoot && !filePath.startsWith(`${resolvedRoot}${path.sep}`)) return false;
@@ -59,7 +52,6 @@ async function serveStatic(pathname, response) {
       if (error.code !== 'ENOENT') throw error;
     }
   }
-
   return false;
 }
 
@@ -84,13 +76,9 @@ function corsHeaders(request) {
   };
 }
 
-function clientIp(request) {
-  return String(request.headers['x-forwarded-for'] || request.socket.remoteAddress || 'unknown').split(',')[0].trim();
-}
-
 function rateLimit(request) {
   const now = Date.now();
-  const key = clientIp(request);
+  const key = String(request.headers['x-forwarded-for'] || request.socket.remoteAddress || 'unknown').split(',')[0].trim();
   const bucket = rateBuckets.get(key);
   if (!bucket || bucket.resetAt <= now) {
     rateBuckets.set(key, { count: 1, resetAt: now + config.rateLimitWindowMs });
@@ -116,25 +104,6 @@ async function readJson(request, maxBytes = 1_000_000) {
   }
 }
 
-function safeEqualToken(actual = '', expected = '') {
-  if (!expected || !actual) return false;
-  const left = Buffer.from(actual);
-  const right = Buffer.from(expected);
-  return left.length === right.length && crypto.timingSafeEqual(left, right);
-}
-
-function isAdmin(request) {
-  const header = String(request.headers.authorization || '');
-  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
-  return safeEqualToken(token, config.apiAdminToken);
-}
-
-async function synchronize(sources) {
-  if (syncInFlight) return syncInFlight;
-  syncInFlight = runConnectors({ store, sources }).finally(() => { syncInFlight = null; });
-  return syncInFlight;
-}
-
 export function createMedicalServer() {
   return http.createServer(async (request, response) => {
     const cors = corsHeaders(request);
@@ -145,7 +114,6 @@ export function createMedicalServer() {
       response.end();
       return;
     }
-
     if (cors['Access-Control-Allow-Origin'] === 'null' && getOrigin(request)) {
       json(response, 403, { error: 'Origin not allowed' });
       return;
@@ -164,85 +132,49 @@ export function createMedicalServer() {
 
     try {
       if (request.method === 'GET' && url.pathname === '/api/health') {
-        json(response, 200, {
-          status: 'ok',
-          knowledge: store.getStatus(),
+        let knowledge;
+        try {
+          knowledge = await knowledgePlane.health();
+        } catch (error) {
+          knowledge = { service: 'medical-knowledge-plane', status: 'unavailable', error: error.message };
+        }
+        const usable = knowledge.freshness?.usable !== false && knowledge.status !== 'unavailable';
+        json(response, usable ? 200 : 503, {
+          service: 'medical-chat-gateway',
+          status: usable ? 'ok' : 'degraded',
+          knowledge,
           models: {
             openRouterConfigured: Boolean(config.openRouter.apiKey),
             googleConfigured: Boolean(config.google.apiKey)
           },
-          syncEnabled: config.syncEnabled,
+          localClinicalProcessing: false,
           timestamp: new Date().toISOString()
         });
         return;
       }
 
       if (request.method === 'GET' && url.pathname === '/api/knowledge/status') {
-        json(response, 200, store.getStatus());
+        json(response, 200, await knowledgePlane.status());
         return;
       }
 
       if (request.method === 'GET' && url.pathname === '/api/knowledge/search') {
-        const sources = url.searchParams.getAll('source');
-        const result = store.search(url.searchParams.get('q') || '', {
+        json(response, 200, await knowledgePlane.search(url.searchParams.get('q') || '', {
           limit: url.searchParams.get('limit') || 8,
-          sources,
+          sources: url.searchParams.getAll('source'),
           maxEvidenceTier: url.searchParams.get('maxEvidenceTier') || 4
-        });
-        json(response, 200, result);
+        }));
         return;
       }
 
       if (request.method === 'GET' && url.pathname === '/api/knowledge/diseases') {
-        json(response, 200, { diseases: store.listDiseases(), count: store.listDiseases().length });
+        json(response, 200, await knowledgePlane.diseases());
         return;
       }
 
-      const diseaseMatch = request.method === 'GET' && url.pathname.match(/^\/api\/knowledge\/diseases\/([^/]+)$/);
-      if (diseaseMatch) {
-        const disease = store.getDisease(decodeURIComponent(diseaseMatch[1]));
-        json(response, disease ? 200 : 404, disease || { error: 'Disease not found' });
-        return;
-      }
-
-      if (request.method === 'POST' && url.pathname === '/api/safety/assess') {
+      if (request.method === 'POST' && url.pathname === '/api/chat/stream') {
         const body = await readJson(request);
-        const assessment = assessMedicalSafety(body.text || body.message || '');
-        const locale = body.locale || detectLocale(body.text || body.message || '');
-        json(response, 200, {
-          ...assessment,
-          locale,
-          response: assessment.level === 'normal' ? null : buildSafetyResponse(assessment, locale)
-        });
-        return;
-      }
-
-      if (request.method === 'POST' && url.pathname === '/api/models/openrouter/stream') {
-        const body = await readJson(request);
-        await streamOpenRouter(body, response);
-        return;
-      }
-
-      if (request.method === 'POST' && url.pathname === '/api/models/google/generate') {
-        const body = await readJson(request);
-        const result = await generateGoogle(body);
-        json(response, 200, result);
-        return;
-      }
-
-      if (request.method === 'POST' && url.pathname === '/api/knowledge/sync') {
-        if (!config.apiAdminToken || !isAdmin(request)) {
-          json(response, 401, { error: 'Administrator token required' });
-          return;
-        }
-        if (!config.syncEnabled) {
-          json(response, 409, { error: 'Knowledge synchronization is disabled' });
-          return;
-        }
-        const body = await readJson(request);
-        const sources = Array.isArray(body.sources) ? body.sources : undefined;
-        const result = await synchronize(sources);
-        json(response, 200, result);
+        await streamMedicalChat(body, response);
         return;
       }
 
@@ -257,23 +189,11 @@ export function createMedicalServer() {
 }
 
 export async function startMedicalServer() {
-  await store.initialize();
   const server = createMedicalServer();
   await new Promise((resolve) => server.listen(config.port, config.host, resolve));
-  console.log(`Medical API listening on http://${config.host}:${config.port}`);
-
-  if (config.syncEnabled && config.syncOnStart) {
-    synchronize().catch((error) => console.error('Initial knowledge sync failed:', error));
-  }
-
-  let timer = null;
-  if (config.syncEnabled && config.syncIntervalMinutes > 0) {
-    timer = setInterval(() => synchronize().catch((error) => console.error('Scheduled knowledge sync failed:', error)), config.syncIntervalMinutes * 60_000);
-    timer.unref();
-  }
+  console.log(`Medical chat gateway listening on http://${config.host}:${config.port}`);
 
   const shutdown = () => {
-    if (timer) clearInterval(timer);
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(1), 5000).unref();
   };
