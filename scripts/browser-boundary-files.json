@@ -1,0 +1,13 @@
+{
+  "retired": [
+    "src/services/analytics/AnalyticsStep.js",
+    "src/services/googleAI.js",
+    "src/services/openrouter.js",
+    "src/services/orchestrator/HealthcareOrchestrator.js",
+    "src/services/parallel/ParallelStep.js",
+    "src/services/rag/KnowledgeBase.js",
+    "src/services/rag/RAGStep.js",
+    "src/services/rag/VectorStore.js",
+    "src/services/safety/medicalSafety.js"
+  ]
+}
