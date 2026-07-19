@@ -1,23 +1,30 @@
 {
   "name": "potential-medical-ai",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
-  "description": "Evidence-aware healthcare assistant with a versioned near-realtime medical knowledge platform",
+  "description": "Evidence-aware healthcare assistant with a separate MCP-enabled medical knowledge control plane",
   "main": "server/server.js",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/start-platform.js --web",
     "dev:web": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "node server/server.js",
-    "server": "node server/server.js",
-    "server:chat": "json-server --watch db.json --port 3001",
-    "sync:knowledge": "node server/sync.js",
+    "start": "node scripts/start-platform.js",
+    "start:platform": "node scripts/start-platform.js",
+    "start:gateway": "node server/server.js",
+    "start:knowledge": "node knowledge-plane/server.js",
+    "mcp:knowledge": "node knowledge-plane/mcp.js",
+    "server:chat-history": "json-server --watch db.json --port 3001",
+    "sync:knowledge": "node knowledge-plane/sync.js",
     "test": "node --test",
     "check": "npm test && npm run build",
     "security-check": "node scripts/check-security.js"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "clsx": "^2.0.0",
     "json-server": "^0.17.4",
     "lucide-react": "^0.294.0",
@@ -25,7 +32,8 @@
     "react-dom": "^18.2.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
-    "tailwind-merge": "^2.0.0"
+    "tailwind-merge": "^2.0.0",
+    "zod": "^3.25.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.37",
@@ -39,7 +47,8 @@
   "keywords": [
     "medical-ai",
     "healthcare",
-    "rag",
+    "mcp",
+    "knowledge-control-plane",
     "pubmed",
     "clinical-guidelines",
     "react"
