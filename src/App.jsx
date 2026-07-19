@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React,{useEffect,useRef,useState} from 'react';
 import ChatHeader from './components/ChatHeader';
 import AssistantControlPanel from './components/AssistantControlPanel';
 import ChatInput from './components/ChatInput';
@@ -7,277 +7,42 @@ import ChatSidebar from './components/ChatSidebar';
 import WelcomeMessage from './components/WelcomeMessage';
 import { medicalApi } from './services/apiClient';
 import { ChatHistoryService } from './services/chatHistory';
-import { getTheme, initializeTheme, toggleTheme } from './utils/theme';
+import { getTheme,initializeTheme,toggleTheme } from './utils/theme';
 
-function App() {
-  const [messages, setMessages] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [chatHistoryService, setChatHistoryService] = useState(null);
-  const [platformStatus, setPlatformStatus] = useState(null);
-  const [connectionError, setConnectionError] = useState('');
-  const [chats, setChats] = useState([]);
-  const [currentChatId, setCurrentChatId] = useState(null);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [theme, setThemeState] = useState('dark');
-  const [isPlatformReady, setIsPlatformReady] = useState(false);
-  const [exampleMessage, setExampleMessage] = useState(null);
-  const [controlPanelOpen, setControlPanelOpen] = useState(false);
-  const [sessionToken, setSessionToken] = useState(() => sessionStorage.getItem('medical-user-session') || '');
-  const [selectedAttachmentIds, setSelectedAttachmentIds] = useState([]);
-  const messagesEndRef = useRef(null);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages]);
-
-  useEffect(() => {
-    initializeTheme();
-    setThemeState(getTheme());
-  }, []);
-
-  useEffect(() => {
-    const history = new ChatHistoryService();
-    setChatHistoryService(history);
-    let active = true;
-
-    const refreshHealth = async () => {
-      try {
-        const status = await medicalApi.health();
-        if (!active) return;
-        setPlatformStatus(status);
-        setIsPlatformReady(status.status === 'ok');
-        setConnectionError(status.status === 'ok' ? '' : 'Knowledge plane is stale or unavailable.');
-      } catch (error) {
-        if (!active) return;
-        console.error('Service health check failed:', error);
-        setConnectionError('Không thể kết nối chat gateway hoặc knowledge plane. Hãy chạy npm run start:platform.');
-        setIsPlatformReady(false);
-      }
-    };
-
-    refreshHealth();
-    const timer = setInterval(refreshHealth, 15000);
-    return () => {
-      active = false;
-      clearInterval(timer);
-    };
-  }, []);
-
-  const loadChats = async () => {
-    if (!chatHistoryService) return;
-    try {
-      setChats(await chatHistoryService.getAllChats());
-    } catch (error) {
-      console.error('Error loading chats:', error);
-    }
-  };
-
-  useEffect(() => {
-    loadChats();
-  }, [chatHistoryService]);
-
-  const createChatIfNeeded = async () => {
-    if (currentChatId) return currentChatId;
-    const newChat = await chatHistoryService.createChat();
-    setChats((previous) => [newChat, ...previous]);
-    setCurrentChatId(newChat.id);
-    return newChat.id;
-  };
-
-  const handleSendMessage = async (message) => {
-    if (!chatHistoryService || !isPlatformReady || isLoading) return;
-    setExampleMessage(null);
-    let chatId;
-
-    try {
-      chatId = await createChatIfNeeded();
-      const userMessage = { role: 'user', content: message };
-      await chatHistoryService.addMessage(chatId, userMessage);
-      setMessages((previous) => [...previous, userMessage, { role: 'assistant', content: '', isTyping: false }]);
-      setIsLoading(true);
-
-      const conversationHistory = [
-        ...messages.map(({ role, content }) => ({ role, content })),
-        userMessage
-      ];
-      let streamingResponse = '';
-      const result = await medicalApi.streamChat(message, conversationHistory, (chunk) => {
-        streamingResponse += chunk;
-        setMessages((previous) => {
-          const next = [...previous];
-          const last = next[next.length - 1];
-          if (last?.role === 'assistant') next[next.length - 1] = { ...last, content: streamingResponse };
-          return next;
-        });
-      }, { token: sessionToken, attachmentIds: selectedAttachmentIds, locale: 'auto' });
-
-      const finalContent = result.text || streamingResponse || 'No response was generated.';
-      setMessages((previous) => {
-        const next = [...previous];
-        const last = next[next.length - 1];
-        if (last?.role === 'assistant') next[next.length - 1] = { ...last, content: finalContent };
-        return next;
-      });
-      await chatHistoryService.addMessage(chatId, { role: 'assistant', content: finalContent });
-      await loadChats();
-      if (result.metadata?.freshness) {
-        setPlatformStatus((previous) => ({
-          ...(previous || {}),
-          knowledge: { ...(previous?.knowledge || {}), freshness: result.metadata.freshness }
-        }));
-      }
-      setConnectionError(result.error || '');
-    } catch (error) {
-      console.error('Error sending message:', error);
-      const errorContent = 'Chat gateway hoặc knowledge plane đang không khả dụng. Hệ thống không dùng kiến thức cục bộ để tạo câu trả lời thay thế.';
-      setMessages((previous) => {
-        const next = previous.filter((item) => !item.isTyping);
-        const last = next[next.length - 1];
-        if (last?.role === 'assistant' && !last.content) next[next.length - 1] = { ...last, content: errorContent };
-        else next.push({ role: 'assistant', content: errorContent });
-        return next;
-      });
-      if (chatId) {
-        try {
-          await chatHistoryService.addMessage(chatId, { role: 'assistant', content: errorContent });
-        } catch {
-          // Preserve the visible error when chat persistence is unavailable.
-        }
-      }
-      setConnectionError(error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleNewChat = async () => {
-    const newChat = await chatHistoryService.createChat();
-    setChats((previous) => [newChat, ...previous]);
-    setCurrentChatId(newChat.id);
-    setMessages([]);
-    setSidebarOpen(false);
-  };
-
-  const handleSelectChat = async (chatId) => {
-    setMessages(await chatHistoryService.getChatMessages(chatId));
-    setCurrentChatId(chatId);
-    setSidebarOpen(false);
-  };
-
-  const handleDeleteChat = async (chatId) => {
-    await chatHistoryService.deleteChat(chatId);
-    setChats((previous) => previous.filter((chat) => chat.id !== chatId));
-    if (currentChatId === chatId) {
-      setCurrentChatId(null);
-      setMessages([]);
-    }
-  };
-
-  const handleClearChat = async () => {
-    if (currentChatId && chatHistoryService) {
-      await chatHistoryService.clearChatMessages(currentChatId);
-      await loadChats();
-    }
-    setMessages([]);
-  };
-
-  const handleUpdateChatTitle = async (chatId, newTitle) => {
-    await chatHistoryService.updateChatTitle(chatId, newTitle);
-    await loadChats();
-  };
-
-  const handleSessionTokenChange = (value) => {
-    setSessionToken(value);
-    if (value) sessionStorage.setItem('medical-user-session', value);
-    else sessionStorage.removeItem('medical-user-session');
-  };
-
-  const freshness = platformStatus?.knowledge?.freshness;
-
-  return (
-    <div className="chat-container">
-      {sidebarOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
-      )}
-
-      <ChatSidebar
-        chats={chats}
-        currentChatId={currentChatId}
-        onSelectChat={handleSelectChat}
-        onNewChat={handleNewChat}
-        onDeleteChat={handleDeleteChat}
-        onUpdateChatTitle={handleUpdateChatTitle}
-        isOpen={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-      />
-
-      <div className="chat-main">
-        <ChatHeader
-          onClearChat={handleClearChat}
-          hasMessages={messages.length > 0}
-          onToggleSidebar={() => setSidebarOpen((value) => !value)}
-          theme={theme}
-          onToggleTheme={() => setThemeState(toggleTheme())}
-        />
-
-        <div className="chat-messages">
-          <div className="chat-messages-content">
-            {messages.length === 0 ? (
-              <WelcomeMessage onExampleClick={setExampleMessage} />
-            ) : (
-              <div className="space-y-4">
-                {messages.map((message, index) => (
-                  <div key={`${message.role}-${index}`} className="slide-in-up">
-                    <ChatMessage message={message.content} isUser={message.role === 'user'} isTyping={message.isTyping} />
-                  </div>
-                ))}
-                <div ref={messagesEndRef} />
-              </div>
-            )}
-          </div>
-        </div>
-
-        <ChatInput
-          onSendMessage={handleSendMessage}
-          isLoading={isLoading}
-          placeholder={isPlatformReady ? 'Nhập câu hỏi sức khỏe của bạn...' : 'Đang chờ knowledge plane đạt freshness SLO...'}
-          disabled={!isPlatformReady}
-          exampleMessage={exampleMessage}
-        />
-      </div>
-
-      <button
-        className="fixed top-4 right-4 z-30 px-3 py-2 rounded-lg bg-blue-700 text-white text-xs shadow-lg"
-        onClick={() => setControlPanelOpen(true)}
-      >
-        Assistant controls{selectedAttachmentIds.length ? ` (${selectedAttachmentIds.length} evidence)` : ''}
-      </button>
-
-      <AssistantControlPanel
-        open={controlPanelOpen}
-        onClose={() => setControlPanelOpen(false)}
-        token={sessionToken}
-        onTokenChange={handleSessionTokenChange}
-        messages={messages}
-        selectedAttachmentIds={selectedAttachmentIds}
-        onSelectedAttachmentIdsChange={setSelectedAttachmentIds}
-      />
-
-      {connectionError && (
-        <div className="fixed bottom-2 right-2 sm:bottom-4 sm:right-4 bg-red-50 border border-red-200 rounded-lg shadow-lg p-3 sm:p-4 max-w-xs sm:max-w-sm z-50">
-          <h3 className="text-xs sm:text-sm font-medium text-red-800">Medical platform unavailable</h3>
-          <p className="text-xs sm:text-sm text-red-700 mt-1">{connectionError}</p>
-          <p className="text-xs text-red-600 mt-2">Không có fallback kiến thức cục bộ.</p>
-        </div>
-      )}
-
-      {freshness && freshness.level !== 'fresh' && !connectionError && (
-        <div className="fixed bottom-4 right-4 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
-          Knowledge freshness: {freshness.level}. Clinical answers may be blocked by fail-closed policy.
-        </div>
-      )}
-    </div>
-  );
+export default function App(){
+ const [messages,setMessages]=useState([]),[isLoading,setIsLoading]=useState(false),[historyService,setHistoryService]=useState(null),[platformStatus,setPlatformStatus]=useState(null),[connectionError,setConnectionError]=useState(''),[chats,setChats]=useState([]),[currentChatId,setCurrentChatId]=useState(null),[sidebarOpen,setSidebarOpen]=useState(false),[theme,setTheme]=useState('light'),[ready,setReady]=useState(false),[example,setExample]=useState(null),[controlsOpen,setControlsOpen]=useState(false),[sessionToken,setSessionToken]=useState(()=>sessionStorage.getItem('medical-user-session')||''),[attachmentIds,setAttachmentIds]=useState([]); const endRef=useRef(null);
+ useEffect(()=>{endRef.current?.scrollIntoView({behavior:'smooth',block:'end'})},[messages]);
+ useEffect(()=>{initializeTheme();setTheme(getTheme())},[]);
+ useEffect(()=>{const service=new ChatHistoryService();setHistoryService(service);let live=true;const health=async()=>{try{const status=await medicalApi.health();if(!live)return;setPlatformStatus(status);setReady(status.status==='ok');setConnectionError(status.status==='ok'?'':'Knowledge plane is stale or unavailable.')}catch(e){if(live){setConnectionError('Không thể kết nối chat gateway hoặc knowledge plane.');setReady(false)}}};health();const timer=setInterval(health,15000);return()=>{live=false;clearInterval(timer)}},[]);
+ const loadChats=async()=>{if(historyService)setChats(await historyService.getAllChats())}; useEffect(()=>{loadChats()},[historyService]);
+ const ensureChat=async()=>{if(currentChatId)return currentChatId;const chat=await historyService.createChat();setChats(p=>[chat,...p]);setCurrentChatId(chat.id);return chat.id};
+ const send=async(message)=>{if(!historyService||!ready||isLoading)return;let chatId;setExample(null);try{chatId=await ensureChat();const user={role:'user',content:message};await historyService.addMessage(chatId,user);setMessages(p=>[...p,user,{role:'assistant',content:'',isTyping:true}]);setIsLoading(true);const history=[...messages.map(({role,content})=>({role,content})),user];let streamed='';const result=await medicalApi.streamChat(message,history,chunk=>{streamed+=chunk;setMessages(p=>{const next=[...p];next[next.length-1]={role:'assistant',content:streamed,isTyping:false};return next})},{token:sessionToken,attachmentIds,locale:'auto'});const finalText=result.text||streamed||'No response was generated.';setMessages(p=>{const next=[...p];next[next.length-1]={role:'assistant',content:finalText};return next});await historyService.addMessage(chatId,{role:'assistant',content:finalText});await loadChats();if(result.metadata?.freshness)setPlatformStatus(p=>({...p,knowledge:{...(p?.knowledge||{}),freshness:result.metadata.freshness}}));setConnectionError(result.error||'')}catch(e){const text='Chat gateway hoặc knowledge plane đang không khả dụng. Hệ thống không dùng kiến thức cục bộ để trả lời thay thế.';setMessages(p=>{const next=[...p];if(next.at(-1)?.role==='assistant')next[next.length-1]={role:'assistant',content:text};else next.push({role:'assistant',content:text});return next});setConnectionError(e.message)}finally{setIsLoading(false)}};
+ const newChat=async()=>{const chat=await historyService.createChat();setChats(p=>[chat,...p]);setCurrentChatId(chat.id);setMessages([]);setSidebarOpen(false)};
+ const selectChat=async id=>{setMessages(await historyService.getChatMessages(id));setCurrentChatId(id);setSidebarOpen(false)};
+ const deleteChat=async id=>{await historyService.deleteChat(id);setChats(p=>p.filter(c=>c.id!==id));if(id===currentChatId){setCurrentChatId(null);setMessages([])}};
+ const clear=async()=>{if(currentChatId)await historyService.clearChatMessages(currentChatId);setMessages([]);loadChats()};
+ const updateTitle=async(id,title)=>{await historyService.updateChatTitle(id,title);loadChats()};
+ const changeToken=value=>{setSessionToken(value);value?sessionStorage.setItem('medical-user-session',value):sessionStorage.removeItem('medical-user-session')};
+ const freshness=platformStatus?.knowledge?.freshness;
+ return <div className="medical-app">
+   <ChatHeader onClearChat={clear} hasMessages={messages.length>0} onToggleSidebar={()=>setSidebarOpen(v=>!v)} theme={theme} onToggleTheme={()=>setTheme(toggleTheme())} freshness={freshness}/>
+   <div className="app-body">
+    {sidebarOpen&&<button className="mobile-scrim" onClick={()=>setSidebarOpen(false)} aria-label="Close navigation"/>}
+    <ChatSidebar chats={chats} currentChatId={currentChatId} onSelectChat={selectChat} onNewChat={newChat} onDeleteChat={deleteChat} onUpdateChatTitle={updateTitle} isOpen={sidebarOpen} onClose={()=>setSidebarOpen(false)}/>
+    <main className="conversation-pane">
+      <div className="conversation-scroll"><div className="conversation-width">{messages.length===0?<WelcomeMessage onExampleClick={setExample}/>:messages.map((m,i)=><ChatMessage key={`${m.role}-${i}`} message={m.content} isUser={m.role==='user'} isTyping={m.isTyping}/>)}<div ref={endRef}/></div></div>
+      <ChatInput onSendMessage={send} isLoading={isLoading} disabled={!ready} exampleMessage={example} placeholder={ready?'Ask a clinical question…':'Waiting for verified knowledge freshness…'} onOpenControls={()=>setControlsOpen(true)}/>
+    </main>
+    <aside className="desktop-control-preview">
+      <div className="preview-head"><div><strong>Assistant controls</strong><span>Context, evidence & sharing</span></div><button onClick={()=>setControlsOpen(true)}>Manage</button></div>
+      <div className="preview-card"><span className="eyebrow">Patient context</span><strong>{sessionToken?'Secure session connected':'Connect a secure session'}</strong><p>Add consented medications, allergies, diagnoses and locale.</p></div>
+      <div className="preview-card"><span className="eyebrow">Evidence attachments</span><strong>{attachmentIds.length} selected</strong><p>Encrypted uploads with extraction confidence and citations.</p><button onClick={()=>setControlsOpen(true)}>Manage evidence</button></div>
+      <div className="preview-card timeline-mini"><span className="eyebrow">Governed workflow</span><ul><li><i/>Freshness checked</li><li><i/>Server-side safety</li><li><i/>Clinician sharing audited</li></ul></div>
+      <div className="preview-card"><span className="eyebrow">System boundary</span><p>No model keys, RAG, diagnosis engine or medical fallback runs in the browser.</p></div>
+    </aside>
+   </div>
+   <footer className="app-footer"><span>100% server-side clinical processing</span><i/> <span>No local clinical fallback</span><i/> <span>Versioned evidence and citations</span></footer>
+   <AssistantControlPanel open={controlsOpen} onClose={()=>setControlsOpen(false)} token={sessionToken} onTokenChange={changeToken} messages={messages} selectedAttachmentIds={attachmentIds} onSelectedAttachmentIdsChange={setAttachmentIds}/>
+   {connectionError&&<div className="toast-error"><strong>Medical platform unavailable</strong><span>{connectionError}</span></div>}
+ </div>
 }
-
-export default App;
