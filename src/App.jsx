@@ -4,22 +4,21 @@ import ChatInput from './components/ChatInput';
 import ChatMessage from './components/ChatMessage';
 import ChatSidebar from './components/ChatSidebar';
 import WelcomeMessage from './components/WelcomeMessage';
+import { medicalApi } from './services/apiClient';
 import { ChatHistoryService } from './services/chatHistory';
-import { HealthcareOrchestrator } from './services/orchestrator/HealthcareOrchestrator.js';
 import { getTheme, initializeTheme, toggleTheme } from './utils/theme';
 
 function App() {
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [chatHistoryService, setChatHistoryService] = useState(null);
-  const [healthcareOrchestrator, setHealthcareOrchestrator] = useState(null);
-  const [orchestratorStats, setOrchestratorStats] = useState(null);
+  const [platformStatus, setPlatformStatus] = useState(null);
   const [connectionError, setConnectionError] = useState('');
   const [chats, setChats] = useState([]);
   const [currentChatId, setCurrentChatId] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [theme, setThemeState] = useState('dark');
-  const [isOrchestratorReady, setIsOrchestratorReady] = useState(false);
+  const [isPlatformReady, setIsPlatformReady] = useState(false);
   const [exampleMessage, setExampleMessage] = useState(null);
   const messagesEndRef = useRef(null);
 
@@ -33,22 +32,31 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const initializeServices = async () => {
+    const history = new ChatHistoryService();
+    setChatHistoryService(history);
+    let active = true;
+
+    const refreshHealth = async () => {
       try {
-        const history = new ChatHistoryService();
-        const orchestrator = new HealthcareOrchestrator();
-        await orchestrator.initialize();
-        setChatHistoryService(history);
-        setHealthcareOrchestrator(orchestrator);
-        setOrchestratorStats(orchestrator.getComprehensiveStats());
-        setIsOrchestratorReady(true);
-        setConnectionError('');
+        const status = await medicalApi.health();
+        if (!active) return;
+        setPlatformStatus(status);
+        setIsPlatformReady(status.status === 'ok');
+        setConnectionError(status.status === 'ok' ? '' : 'Knowledge plane is stale or unavailable.');
       } catch (error) {
-        console.error('Service initialization failed:', error);
-        setConnectionError('Không thể kết nối Medical API. Hãy chạy npm run server hoặc cấu hình VITE_MEDICAL_API_URL.');
+        if (!active) return;
+        console.error('Service health check failed:', error);
+        setConnectionError('Không thể kết nối chat gateway hoặc knowledge plane. Hãy chạy npm run start:platform.');
+        setIsPlatformReady(false);
       }
     };
-    initializeServices();
+
+    refreshHealth();
+    const timer = setInterval(refreshHealth, 15000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
   }, []);
 
   const loadChats = async () => {
@@ -73,7 +81,7 @@ function App() {
   };
 
   const handleSendMessage = async (message) => {
-    if (!chatHistoryService || !healthcareOrchestrator || !isOrchestratorReady || isLoading) return;
+    if (!chatHistoryService || !isPlatformReady || isLoading) return;
     setExampleMessage(null);
     let chatId;
 
@@ -89,22 +97,17 @@ function App() {
         userMessage
       ];
       let streamingResponse = '';
-      const result = await healthcareOrchestrator.processUserQuery(
-        message,
-        conversationHistory,
-        chatId,
-        (chunk) => {
-          streamingResponse += chunk;
-          setMessages((previous) => {
-            const next = [...previous];
-            const last = next[next.length - 1];
-            if (last?.role === 'assistant') next[next.length - 1] = { ...last, content: streamingResponse };
-            return next;
-          });
-        }
-      );
+      const result = await medicalApi.streamChat(message, conversationHistory, (chunk) => {
+        streamingResponse += chunk;
+        setMessages((previous) => {
+          const next = [...previous];
+          const last = next[next.length - 1];
+          if (last?.role === 'assistant') next[next.length - 1] = { ...last, content: streamingResponse };
+          return next;
+        });
+      });
 
-      const finalContent = result.response || streamingResponse || result.error || 'No response was generated.';
+      const finalContent = result.text || streamingResponse || 'No response was generated.';
       setMessages((previous) => {
         const next = [...previous];
         const last = next[next.length - 1];
@@ -113,11 +116,16 @@ function App() {
       });
       await chatHistoryService.addMessage(chatId, { role: 'assistant', content: finalContent });
       await loadChats();
-      setOrchestratorStats(healthcareOrchestrator.getComprehensiveStats());
-      setConnectionError('');
+      if (result.metadata?.freshness) {
+        setPlatformStatus((previous) => ({
+          ...(previous || {}),
+          knowledge: { ...(previous?.knowledge || {}), freshness: result.metadata.freshness }
+        }));
+      }
+      setConnectionError(result.error || '');
     } catch (error) {
       console.error('Error sending message:', error);
-      const errorContent = 'Hệ thống kiến thức hoặc mô hình đang tạm thời không khả dụng. Nếu có triệu chứng khẩn cấp, hãy liên hệ cấp cứu địa phương; nếu không, vui lòng thử lại.';
+      const errorContent = 'Chat gateway hoặc knowledge plane đang không khả dụng. Hệ thống không dùng kiến thức cục bộ để tạo câu trả lời thay thế.';
       setMessages((previous) => {
         const next = previous.filter((item) => !item.isTyping);
         const last = next[next.length - 1];
@@ -129,7 +137,7 @@ function App() {
         try {
           await chatHistoryService.addMessage(chatId, { role: 'assistant', content: errorContent });
         } catch {
-          // Preserve the visible error even when chat persistence is unavailable.
+          // Preserve the visible error when chat persistence is unavailable.
         }
       }
       setConnectionError(error.message);
@@ -139,37 +147,25 @@ function App() {
   };
 
   const handleNewChat = async () => {
-    try {
-      const newChat = await chatHistoryService.createChat();
-      setChats((previous) => [newChat, ...previous]);
-      setCurrentChatId(newChat.id);
-      setMessages([]);
-      setSidebarOpen(false);
-    } catch (error) {
-      console.error('Error creating chat:', error);
-    }
+    const newChat = await chatHistoryService.createChat();
+    setChats((previous) => [newChat, ...previous]);
+    setCurrentChatId(newChat.id);
+    setMessages([]);
+    setSidebarOpen(false);
   };
 
   const handleSelectChat = async (chatId) => {
-    try {
-      setMessages(await chatHistoryService.getChatMessages(chatId));
-      setCurrentChatId(chatId);
-      setSidebarOpen(false);
-    } catch (error) {
-      console.error('Error loading chat:', error);
-    }
+    setMessages(await chatHistoryService.getChatMessages(chatId));
+    setCurrentChatId(chatId);
+    setSidebarOpen(false);
   };
 
   const handleDeleteChat = async (chatId) => {
-    try {
-      await chatHistoryService.deleteChat(chatId);
-      setChats((previous) => previous.filter((chat) => chat.id !== chatId));
-      if (currentChatId === chatId) {
-        setCurrentChatId(null);
-        setMessages([]);
-      }
-    } catch (error) {
-      console.error('Error deleting chat:', error);
+    await chatHistoryService.deleteChat(chatId);
+    setChats((previous) => previous.filter((chat) => chat.id !== chatId));
+    if (currentChatId === chatId) {
+      setCurrentChatId(null);
+      setMessages([]);
     }
   };
 
@@ -182,17 +178,11 @@ function App() {
   };
 
   const handleUpdateChatTitle = async (chatId, newTitle) => {
-    try {
-      await chatHistoryService.updateChatTitle(chatId, newTitle);
-      await loadChats();
-    } catch (error) {
-      console.error('Error updating chat title:', error);
-    }
+    await chatHistoryService.updateChatTitle(chatId, newTitle);
+    await loadChats();
   };
 
-  const handleToggleTheme = () => {
-    setThemeState(toggleTheme());
-  };
+  const freshness = platformStatus?.knowledge?.freshness;
 
   return (
     <div className="chat-container">
@@ -217,7 +207,7 @@ function App() {
           hasMessages={messages.length > 0}
           onToggleSidebar={() => setSidebarOpen((value) => !value)}
           theme={theme}
-          onToggleTheme={handleToggleTheme}
+          onToggleTheme={() => setThemeState(toggleTheme())}
         />
 
         <div className="chat-messages">
@@ -240,23 +230,23 @@ function App() {
         <ChatInput
           onSendMessage={handleSendMessage}
           isLoading={isLoading}
-          placeholder={isOrchestratorReady ? 'Nhập câu hỏi sức khỏe của bạn...' : 'Đang kết nối nền tảng kiến thức y khoa...'}
-          disabled={!isOrchestratorReady}
+          placeholder={isPlatformReady ? 'Nhập câu hỏi sức khỏe của bạn...' : 'Đang chờ knowledge plane đạt freshness SLO...'}
+          disabled={!isPlatformReady}
           exampleMessage={exampleMessage}
         />
       </div>
 
       {connectionError && (
         <div className="fixed bottom-2 right-2 sm:bottom-4 sm:right-4 bg-red-50 border border-red-200 rounded-lg shadow-lg p-3 sm:p-4 max-w-xs sm:max-w-sm z-50">
-          <h3 className="text-xs sm:text-sm font-medium text-red-800">Medical API unavailable</h3>
+          <h3 className="text-xs sm:text-sm font-medium text-red-800">Medical platform unavailable</h3>
           <p className="text-xs sm:text-sm text-red-700 mt-1">{connectionError}</p>
-          <p className="text-xs text-red-600 mt-2">API keys must be configured only on the backend.</p>
+          <p className="text-xs text-red-600 mt-2">Không có fallback kiến thức cục bộ.</p>
         </div>
       )}
 
-      {orchestratorStats?.rag?.knowledgeBase?.degraded && !connectionError && (
+      {freshness && freshness.level !== 'fresh' && !connectionError && (
         <div className="fixed bottom-4 right-4 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
-          Knowledge retrieval is running in degraded mode.
+          Knowledge freshness: {freshness.level}. Clinical answers may be blocked by fail-closed policy.
         </div>
       )}
     </div>
