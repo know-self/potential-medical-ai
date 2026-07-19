@@ -24,3 +24,14 @@ jobs:
         run: node -e "await import('./knowledge-plane/mcp.js'); await import('./knowledge-plane/mcp-http.js')"
       - run: npm test
       - run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Render desktop and mobile UI
+        run: npm run visual:test
+      - name: Upload rendered UI screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: rendered-ui
+          path: artifacts/ui-*.png
+          if-no-files-found: error
+          retention-days: 14
