@@ -16,13 +16,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install
+      - run: npm install --no-audit --no-fund
       - name: Syntax check server and CLI modules
         run: |
           find server knowledge-plane scripts tests bin -name '*.js' -print0 | xargs -0 -n1 node --check
       - name: CLI self-check
         run: |
           node bin/pmai.js help
+          node bin/pmai.js --help
           node bin/pmai.js doctor --json
       - name: Import MCP runtime modules
         run: node -e "await import('./knowledge-plane/mcp.js'); await import('./knowledge-plane/mcp-http.js')"

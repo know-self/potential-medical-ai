@@ -1,23 +1,119 @@
 # Potential Medical AI CLI
 
-The `pmai` command is the single entrypoint for running the local platform. It coordinates the knowledge plane, chat gateway, chat-history service, Vite frontend and optional remote MCP process.
+`pmai` is both a terminal-native medical assistant and the process manager for the complete local platform.
 
-## Quick start
+## Install the command
+
+From the repository:
 
 ```bash
 cp env.example .env
 npm install
-npm run doctor
-npm run dev -- --open
+npm link
 ```
 
-Stop the complete stack with `Ctrl+C`. The CLI terminates every child process in reverse startup order.
+`npm link` creates the `pmai` command in your active Node.js installation. Without linking, use `npm run chat` or `npm run pmai -- ...`.
 
-## Commands
+## Terminal assistant
 
-### `pmai dev`
+### Interactive mode
 
-Starts the complete development stack:
+```bash
+pmai
+```
+
+Bare `pmai` opens a streaming REPL. If the default local gateway is not reachable, the CLI starts the knowledge plane and gateway automatically. It reuses services that are already running and stops only child processes it started itself.
+
+```text
+Potential Medical AI terminal assistant
+http://127.0.0.1:8787 · type /help for commands
+
+you › What are the red flags for acute chest pain?
+assistant › ...streaming grounded response...
+```
+
+### One-shot mode
+
+```bash
+pmai "Summarize current heart-failure guidance"
+pmai ask "Explain SGLT2 inhibitors in CKD"
+```
+
+Machine-readable output:
+
+```bash
+pmai ask "Summarize the evidence" --json
+```
+
+Piped input:
+
+```bash
+echo "Explain hypertension staging" | pmai
+cat question.txt | pmai
+```
+
+### Existing or remote gateway
+
+```bash
+pmai --gateway-url http://127.0.0.1:8787 --no-start
+pmai --gateway-url https://medical.example.com --no-start
+```
+
+Set defaults in `.env`:
+
+```env
+PMAI_GATEWAY_URL=https://medical.example.com
+PMAI_SESSION_TOKEN=
+PMAI_LOCALE=auto
+```
+
+When `PMAI_GATEWAY_URL` is configured, the CLI treats it as an existing gateway and does not auto-start local services.
+
+### REPL commands
+
+| Command | Action |
+|---|---|
+| `/help` | Show terminal commands |
+| `/new` | Clear the in-memory conversation and attachment selection |
+| `/status` | Show gateway and knowledge freshness |
+| `/history` | Print the current conversation |
+| `/attach <path>` | Upload and select a document/image |
+| `/attachments` | List selected attachment IDs |
+| `/detach <id\|all>` | Remove selected evidence |
+| `/token <value\|clear>` | Set a private session token for this process |
+| `/context` | Read consented patient context |
+| `/save [path]` | Explicitly save the session as JSON |
+| `/load <path>` | Load a saved session |
+| `/clear` | Clear the terminal screen |
+| `/exit` | Quit |
+
+The default session is memory-only. The CLI never writes a transcript unless `/save` is used. Saved session files use owner-only permissions where supported and never include the session token.
+
+`Ctrl+C` cancels an active stream. Press it again while idle to exit.
+
+### Private context and uploads
+
+Provide a user session token through an environment variable or inside the REPL:
+
+```bash
+PMAI_SESSION_TOKEN=... pmai
+```
+
+```text
+/token eyJ...
+/attach ./guideline.pdf
+/context
+```
+
+The token remains in process memory and is not included when saving a terminal session.
+
+## Web development stack
+
+```bash
+pmai dev --open
+```
+
+This starts, in dependency order:
 
 1. knowledge control plane on `8790`;
 2. JSON chat history on `3001`;
@@ -25,170 +121,145 @@ Starts the complete development stack:
 4. optional authenticated MCP HTTP on `8791`;
 5. Vite on `3000`.
 
-The CLI waits for every HTTP endpoint before starting the next dependency. A `503` from the knowledge plane or gateway is considered reachable but degraded because fail-closed freshness may intentionally block answers before initial synchronization.
+Equivalent repository command:
 
 ```bash
-npm run dev
 npm run dev -- --open
-npm run dev -- --no-sync
-npm run dev -- --mcp-http
 ```
 
-### `pmai host`
-
-Builds the Vite frontend and hosts it from the gateway. Vite is not kept running.
+Useful variants:
 
 ```bash
-npm run host -- --open
+pmai dev --no-sync
+pmai dev --mcp-http
+pmai dev --gateway-port 8887 --knowledge-port 8890
 ```
 
-Host an existing build without rebuilding:
+The process manager waits for each HTTP endpoint before starting the next dependency. HTTP `503` is considered reachable-but-degraded because fail-closed freshness may intentionally lock medical answers before initial synchronization.
+
+## Local production hosting
 
 ```bash
+pmai host --open
+```
+
+`host` builds Vite and serves `dist/` from the gateway. Vite does not remain running.
+
+Serve an existing build:
+
+```bash
+pmai host --skip-build
 npm start
-# equivalent to: node bin/pmai.js host --skip-build
 ```
 
-Trusted LAN example:
+Trusted-LAN example:
 
 ```bash
-npm run host -- \
+pmai host \
   --host 0.0.0.0 \
   --public-host 192.168.1.25 \
-  --gateway-port 8787 \
-  --history-port 3001 \
   --open
 ```
 
-`--public-host` is embedded in the production build for browser-visible chat-history requests. When binding to `0.0.0.0`, the CLI attempts to select the first LAN IPv4 address if `--public-host` is omitted.
+The CLI derives browser-visible gateway/history URLs and injects consistent ports, proxy targets, CORS origins and knowledge-plane URLs.
 
-### `pmai doctor`
+## Operations
 
-Checks:
-
-- supported Node.js version;
-- dependency installation;
-- `.env` availability;
-- model-provider configuration;
-- administrator and privacy secrets;
-- port availability;
-- production build presence when applicable.
+### Doctor
 
 ```bash
-npm run doctor
-npm run doctor -- --json
+pmai doctor
+pmai doctor --json
 ```
 
-Warnings do not fail the command. Missing required files or an unsupported Node version do.
+Checks Node.js, dependencies, `.env`, provider credentials, administrator/privacy secrets, ports and production build presence where applicable.
 
-### `pmai status`
-
-Reads the health of running services without starting them:
+### Status
 
 ```bash
-npm run status
-npm run status -- --json
+pmai status
+pmai status --json
 ```
 
-### `pmai sync`
+Reads gateway, knowledge-plane and chat-history health without starting services.
 
-Triggers the private knowledge-plane synchronization endpoint using `API_ADMIN_TOKEN` from `.env`.
+### Knowledge synchronization
 
 ```bash
-npm run pmai -- sync
-npm run pmai -- sync --sources pubmed,clinicaltrials.gov
+pmai sync
+pmai sync --sources pubmed,clinicaltrials.gov
 ```
 
-## Options
+Requires `API_ADMIN_TOKEN` and calls the private knowledge-plane synchronization endpoint.
+
+## Common options
 
 | Option | Purpose | Default |
 |---|---|---:|
-| `--host` | Bind address for public local services | `127.0.0.1` |
-| `--public-host` | Hostname/IP used by the browser | `localhost` or detected LAN IPv4 |
-| `--web-port` | Vite development port | `3000` |
-| `--gateway-port` | Chat gateway and production frontend port | `8787` |
+| `--gateway-url` | Existing gateway for terminal chat | local gateway |
+| `--session-token` | Private context/upload token | `PMAI_SESSION_TOKEN` |
+| `--locale` | Terminal request locale | `auto` |
+| `--no-start` | Never auto-start terminal backend services | disabled |
+| `--host` | Bind address for web/gateway/history | `127.0.0.1` |
+| `--public-host` | Browser-visible hostname/IP | local or detected LAN IP |
+| `--web-port` | Vite port | `3000` |
+| `--gateway-port` | Gateway/static host port | `8787` |
 | `--knowledge-port` | Private knowledge-plane port | `8790` |
 | `--history-port` | JSON chat-history port | `3001` |
-| `--mcp-http` | Start authenticated Streamable HTTP MCP | disabled |
+| `--mcp-http` | Include authenticated remote MCP | disabled |
 | `--mcp-port` | MCP HTTP port | `8791` |
 | `--no-sync` | Disable automatic connector synchronization | disabled |
-| `--skip-build` | Serve the existing `dist/` directory | disabled |
-| `--open` | Open the browser after startup | disabled |
-| `--env-file` | Load a different environment file | `.env` |
-| `--json` | Machine-readable `doctor` or `status` output | disabled |
-
-CLI flags override environment variables. Existing process environment variables override values loaded from the env file.
-
-## Environment mapping
-
-The CLI derives and injects these runtime values consistently:
-
-- `PORT` and `HOST` for the gateway;
-- `KNOWLEDGE_PLANE_PORT`, `KNOWLEDGE_PLANE_HOST` and `KNOWLEDGE_PLANE_URL`;
-- `MEDICAL_API_PROXY_TARGET` for Vite;
-- same-origin `VITE_MEDICAL_API_URL`;
-- browser-visible `VITE_API_BASE_URL` for history;
-- `ALLOWED_ORIGINS` and `APP_PUBLIC_URL`;
-- `MCP_HTTP_ENABLED` and `MCP_HTTP_PORT`;
-- `SYNC_ENABLED` when `--no-sync` is supplied.
-
-This removes the most common source of local failures: frontend, gateway and knowledge services using inconsistent ports or hostnames.
+| `--skip-build` | Serve existing `dist/` | disabled |
+| `--open` | Open the browser | disabled |
+| `--env-file` | Load another env file | `.env` |
+| `--json` | Machine-readable one-shot/doctor/status output | disabled |
+| `--no-color` | Disable ANSI terminal styling | disabled |
 
 ## Process behavior
 
-- Ports are checked before the first service starts.
-- Child logs are prefixed with the service name.
-- Any unexpected child exit stops the remaining stack.
-- `SIGINT` and `SIGTERM` stop the process group.
-- Production hosting builds before binding service ports unless `--skip-build` is used.
-- The knowledge plane remains bound to its configured private host even when the web/gateway bind address is `0.0.0.0`.
+- Ports are checked before the complete web stack starts.
+- Child logs use service prefixes.
+- Unexpected child exit stops the remaining stack.
+- `SIGINT` and `SIGTERM` terminate process groups.
+- The terminal assistant starts only the knowledge plane and gateway; it does not need Vite or JSON chat history.
+- The knowledge plane remains private even when the hosted web surface binds to `0.0.0.0`.
 
 ## Security boundary
 
-The CLI is intended for local development, test environments and trusted LAN demonstrations.
+The terminal assistant and local process manager are intended for development, test environments and trusted deployments.
 
-The bundled `json-server` chat-history process has no authentication or encryption. Do not expose it directly to the public internet or use it for real patient data. A production deployment must replace or protect it with authenticated APIs, encrypted storage, TLS, access auditing and applicable privacy controls.
+The bundled `json-server` chat-history process has no authentication or encryption. Do not expose it directly to the public internet or use it for real patient data. Production hosting requires authenticated persistence, encryption, TLS, access auditing and applicable privacy governance.
 
-Remote MCP remains disabled unless explicitly enabled. Use independent strong read and sync tokens, a private network and a restrictive host allowlist.
+Remote MCP remains disabled unless explicitly enabled. Use independent strong read/sync tokens, a private network and a restrictive host allowlist.
 
 ## Troubleshooting
 
-### Port is already in use
+### Terminal answer is blocked as stale
 
 Run:
 
 ```bash
-npm run doctor
+pmai status --json
 ```
 
-Then override only the conflicting port:
+Resolve source network/credentials or run an authenticated sync. Fail-closed behavior intentionally refuses unverified stale knowledge.
+
+### Gateway cannot start
 
 ```bash
-npm run dev -- --gateway-port 8887 --knowledge-port 8890
+pmai doctor
 ```
 
-The CLI updates dependent URLs automatically.
+Change only the conflicting ports; dependent URLs are derived automatically.
 
-### Knowledge or gateway reports HTTP 503
-
-This can be expected before required sources complete their first synchronization. Inspect:
+### Use a gateway already running elsewhere
 
 ```bash
-npm run status -- --json
+pmai --gateway-url https://medical.example.com --no-start
 ```
 
-If synchronization is disabled or failed, resolve source credentials/network access or trigger an authenticated sync.
-
-### LAN page loads but chat history fails
-
-Set the machine address that browsers can reach:
+### Remove the linked command
 
 ```bash
-npm run host -- --host 0.0.0.0 --public-host 192.168.1.25
+npm unlink -g potential-medical-ai
 ```
-
-Also permit the history port through the host firewall. Do not expose that port beyond a trusted local network.
-
-### Browser does not open
-
-Opening is optional and may be unavailable in containers or remote shells. Copy the printed `App` URL into a browser instead.

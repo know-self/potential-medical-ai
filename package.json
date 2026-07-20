@@ -1,6 +1,6 @@
 {
   "name": "potential-medical-ai",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "type": "module",
   "description": "Conversational medical assistant with governed realtime evidence, privacy controls, secure collaboration, multimodal ingestion, and MCP access",
   "main": "server/server.js",
@@ -11,6 +11,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "chat": "node bin/pmai.js",
     "dev": "node bin/pmai.js dev",
     "dev:web": "vite",
     "host": "node bin/pmai.js host",
