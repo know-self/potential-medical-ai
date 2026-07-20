@@ -9,7 +9,8 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-    open: true,
+    strictPort: true,
+    open: false,
     proxy: {
       '/api': {
         target: process.env.MEDICAL_API_PROXY_TARGET || 'http://localhost:8787',
