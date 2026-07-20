@@ -88,42 +88,69 @@ Production dependencies and limitations are documented in [Roadmap implementatio
 
 No software can prove that an upstream medical publisher is instantaneously current or error-free. This platform makes freshness explicit and stops grounded answer generation when required freshness cannot be demonstrated.
 
-## Local development
+## Unified local CLI
+
+The `pmai` CLI starts, checks and stops the complete local stack as one process group.
 
 ```bash
 cp env.example .env
 npm install
+npm run doctor
 npm run dev
 ```
 
-`npm run dev` starts the knowledge plane, chat gateway and Vite frontend. Individual processes:
+`npm run dev` starts:
+
+- the private knowledge control plane;
+- the medical chat gateway;
+- the persistent JSON chat-history service;
+- the Vite frontend;
+- optional authenticated MCP HTTP when enabled.
+
+Useful commands:
+
+```bash
+npm run dev -- --open                    # development with browser opening
+npm run status                           # health of all running services
+npm run pmai -- sync --sources pubmed    # authenticated source sync
+npm run pmai -- help                     # every flag and port override
+```
+
+Every child process uses prefixed logs. `Ctrl+C` stops the entire process tree. Port collisions and missing dependencies fail before partial startup. See [CLI guide](docs/CLI.md).
+
+Individual processes remain available for debugging:
 
 ```bash
 npm run start:knowledge
 npm run start:gateway
-npm run dev:web
-npm run mcp:knowledge       # local read-only stdio MCP
-npm run start:mcp-http      # authenticated remote MCP when enabled
-```
-
-The existing optional JSON chat-history service can be started with:
-
-```bash
 npm run server:chat-history
+npm run dev:web
+npm run mcp:knowledge
+npm run start:mcp-http
 ```
 
-## Production
+## Local or LAN hosting
+
+Build the frontend and host the complete stack through the gateway:
 
 ```bash
-npm install
-npm run build
-npm run start:knowledge
-npm run start:gateway
+npm run host -- --open
 ```
 
-Keep the knowledge plane on a private network and expose only the gateway. The gateway may serve the built React application from `dist/`.
+Expose it to a trusted LAN:
 
-Minimum production configuration includes strong independent values for model credentials, `API_ADMIN_TOKEN`, `CLINICAL_REVIEWER_TOKEN`, session signing, user-data encryption and identity-provider bootstrap. Validate source licenses before enabling feeds.
+```bash
+npm run host -- \
+  --host 0.0.0.0 \
+  --public-host 192.168.1.25 \
+  --open
+```
+
+The CLI builds with browser-visible gateway/history URLs, starts the knowledge plane, chat history and gateway in order, waits for each health endpoint, and prints all usable URLs. Use `--skip-build` to serve an existing `dist/` directory and `--mcp-http` to include authenticated Streamable HTTP MCP.
+
+The bundled `json-server` history process is a local/LAN development convenience. **Do not expose it directly to the public internet.** Internet-facing deployment must replace or protect it with authentication, encrypted persistence, TLS/reverse proxying and an appropriate data-governance design.
+
+Keep the knowledge plane on a private network and expose only the gateway in a production topology. Minimum production configuration includes strong independent values for model credentials, `API_ADMIN_TOKEN`, `CLINICAL_REVIEWER_TOKEN`, session signing, user-data encryption and identity-provider bootstrap. Validate source licenses before enabling feeds.
 
 ## MCP knowledge access
 
@@ -166,6 +193,7 @@ Direct provider endpoints and browser-side clinical orchestration are intentiona
 npm test
 npm run build
 npm run check
+npm run visual:test
 ```
 
 `npm test` runs Node tests, medical safety/grounding evaluations, translation evaluations and a browser-boundary guard that prevents local clinical orchestration from returning to `App.jsx`.
@@ -185,6 +213,7 @@ A real-patient deployment still requires clinician-reviewed evaluation datasets 
 
 See:
 
+- [CLI guide](docs/CLI.md)
 - [Knowledge control plane](docs/KNOWLEDGE_CONTROL_PLANE.md)
 - [Roadmap implementation matrix](docs/ROADMAP_IMPLEMENTATION.md)
 - [Medical knowledge platform](docs/MEDICAL_KNOWLEDGE_PLATFORM.md)
