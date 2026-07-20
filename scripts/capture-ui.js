@@ -37,8 +37,14 @@ const health = {
     freshness: {
       level: 'fresh',
       usable: true,
+      failClosed: true,
       checkedAt: '2026-07-19T10:23:00.000Z',
-      sources: {}
+      sources: {
+        pubmed: { required: true, fresh: true },
+        'clinicaltrials.gov': { required: true, fresh: true },
+        'openfda-drug-enforcement': { required: true, fresh: true },
+        'cdc-content-services': { required: true, fresh: true }
+      }
     }
   },
   models: { openRouterConfigured: true, googleConfigured: true },
@@ -63,15 +69,49 @@ const profile = {
     label: 'Chest pain episode',
     value: 'Started this morning',
     confirmedByUser: true
+  }, {
+    id: 'timeline-2',
+    occurredAt: '2026-07-19T09:45:00.000Z',
+    type: 'measurement',
+    label: 'ECG result',
+    value: 'No ST elevation reported',
+    confirmedByUser: true
+  }, {
+    id: 'timeline-3',
+    occurredAt: '2026-07-18T16:30:00.000Z',
+    type: 'measurement',
+    label: 'LDL cholesterol',
+    value: '98 mg/dL',
+    confirmedByUser: true
   }]
 };
 
+const uploads = [{
+  id: 'upload-1',
+  filename: 'ESC-NSTE-ACS-Guideline.pdf',
+  mimeType: 'application/pdf',
+  sizeBytes: 911000,
+  createdAt: '2026-07-19T09:02:00.000Z',
+  updatedAt: '2026-07-19T09:05:00.000Z',
+  extraction: {
+    status: 'complete',
+    confidence: 0.96,
+    version: 'v2',
+    page: 23,
+    snippets: [{ text: 'Cardiac troponin I or T is the preferred biomarker for myocardial injury assessment.', page: 23, confidence: 0.97 }, { text: 'An ECG should be obtained promptly to identify acute ischaemic changes.', page: 23, confidence: 0.95 }, { text: 'Risk stratification should guide the urgency of additional testing and management.', page: 24, confidence: 0.91 }]
+  }
+}, {
+  id: 'upload-2',
+  filename: 'ACC-AHA-Chest-Pain-Guideline.pdf',
+  mimeType: 'application/pdf',
+  sizeBytes: 1240000,
+  createdAt: '2026-07-19T09:04:00.000Z',
+  updatedAt: '2026-07-19T09:07:00.000Z',
+  extraction: { status: 'complete', confidence: 0.94, page: 11, snippets: [] }
+}];
+
 function json(route, payload, status = 200) {
-  return route.fulfill({
-    status,
-    contentType: 'application/json; charset=utf-8',
-    body: JSON.stringify(payload)
-  });
+  return route.fulfill({ status, contentType: 'application/json; charset=utf-8', body: JSON.stringify(payload) });
 }
 
 async function installMocks(page) {
@@ -95,46 +135,23 @@ async function installMocks(page) {
     if (url.pathname === '/api/health') return json(route, health);
     if (url.pathname === '/api/status') return json(route, { status: 'operational' });
     if (url.pathname === '/api/privacy/me') return json(route, profile);
-    if (url.pathname === '/api/uploads') return json(route, {
-      uploads: [{
-        id: 'upload-1',
-        filename: 'ESC-NSTE-ACS-Guideline.pdf',
-        mimeType: 'application/pdf',
-        extraction: { status: 'complete', confidence: 0.96 }
-      }, {
-        id: 'upload-2',
-        filename: 'ACC-AHA-Chest-Pain-Guideline.pdf',
-        mimeType: 'application/pdf',
-        extraction: { status: 'complete', confidence: 0.94 }
-      }]
-    });
-    if (url.pathname === '/api/shares') return json(route, {
-      shares: [{ id: 'share-1', label: 'Clinician review', expiresAt: '2026-07-19T11:24:00.000Z', revokedAt: null }]
-    });
+    if (url.pathname === '/api/uploads') return json(route, { uploads });
+    if (url.pathname === '/api/shares') return json(route, { shares: [{ id: 'share-1', label: 'Clinician review', expiresAt: '2026-07-19T11:24:00.000Z', revokedAt: null }] });
     if (url.pathname === '/api/labs/explain') return json(route, { results: [] });
     return json(route, {});
   });
 }
 
 async function assertNoHorizontalOverflow(page, label) {
-  const result = await page.evaluate(() => ({
-    viewport: window.innerWidth,
-    documentWidth: document.documentElement.scrollWidth,
-    bodyWidth: document.body.scrollWidth
-  }));
-  if (result.documentWidth > result.viewport + 1 || result.bodyWidth > result.viewport + 1) {
-    throw new Error(`${label} horizontal overflow: ${JSON.stringify(result)}`);
-  }
+  const result = await page.evaluate(() => ({ viewport: window.innerWidth, documentWidth: document.documentElement.scrollWidth, bodyWidth: document.body.scrollWidth }));
+  if (result.documentWidth > result.viewport + 1 || result.bodyWidth > result.viewport + 1) throw new Error(`${label} horizontal overflow: ${JSON.stringify(result)}`);
 }
 
 let browser;
 let previewServer;
 try {
   await fs.mkdir(outputDir, { recursive: true });
-  previewServer = await startVitePreview({
-    root,
-    preview: { host: '127.0.0.1', port: 4173, strictPort: true }
-  });
+  previewServer = await startVitePreview({ root, preview: { host: '127.0.0.1', port: 4173, strictPort: true } });
   browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1440, height: 960 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
@@ -142,24 +159,30 @@ try {
   await installMocks(page);
   await page.goto('http://127.0.0.1:4173', { waitUntil: 'domcontentloaded', timeout: 15_000 });
   await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
+
   await page.getByText('Chest pain in a 62-year-old male', { exact: true }).click();
   await page.getByText('Cardiac ischemia', { exact: false }).waitFor({ state: 'visible' });
-  await assertNoHorizontalOverflow(page, 'desktop');
-  if (!(await page.locator('.desktop-control-preview').isVisible())) throw new Error('Desktop assistant control rail is not visible');
-  await page.screenshot({ path: path.join(outputDir, 'ui-desktop.png'), fullPage: false });
+  await assertNoHorizontalOverflow(page, 'chat desktop');
+  if (!(await page.locator('.assistant-control-rail').isVisible())) throw new Error('Desktop assistant control rail is not visible');
+  await page.screenshot({ path: path.join(outputDir, 'ui-chat-desktop.png'), fullPage: false });
 
+  await page.locator('.primary-nav').getByRole('button', { name: 'Evidence' }).click();
+  await page.locator('.evidence-workspace').waitFor({ state: 'visible' });
+  await page.getByText('ESC-NSTE-ACS-Guideline.pdf', { exact: true }).first().waitFor({ state: 'visible' });
+  await assertNoHorizontalOverflow(page, 'evidence desktop');
+  await page.screenshot({ path: path.join(outputDir, 'ui-evidence-desktop.png'), fullPage: false });
+
+  await page.locator('.primary-nav').getByRole('button', { name: 'Chat' }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(350);
   await assertNoHorizontalOverflow(page, 'mobile');
-  if (await page.locator('.desktop-control-preview').isVisible()) throw new Error('Desktop assistant control rail should be hidden on mobile');
+  if (await page.locator('.assistant-control-rail').isVisible()) throw new Error('Desktop assistant control rail should be hidden on mobile');
   await page.getByRole('button', { name: 'Open navigation' }).click();
   await page.waitForTimeout(200);
   await page.screenshot({ path: path.join(outputDir, 'ui-mobile.png'), fullPage: false });
 
-  console.log('Visual smoke test passed: desktop and mobile screenshots captured without horizontal overflow.');
+  console.log('Visual smoke test passed: chat, evidence and mobile screenshots captured without horizontal overflow.');
 } finally {
   await browser?.close();
-  if (previewServer?.httpServer) {
-    await new Promise((resolve) => previewServer.httpServer.close(resolve));
-  }
+  if (previewServer?.httpServer) await new Promise((resolve) => previewServer.httpServer.close(resolve));
 }
