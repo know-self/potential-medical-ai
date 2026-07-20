@@ -1,19 +1,36 @@
 {
-  "name": "ai-chatbot",
-  "version": "1.0.0",
+  "name": "potential-medical-ai",
+  "version": "3.0.0",
   "type": "module",
-  "description": "Modern AI Chatbot using OpenRouter API with Google Gemma 3 12B",
-  "main": "index.js",
+  "description": "Conversational medical assistant with governed realtime evidence, privacy controls, secure collaboration, multimodal ingestion, and MCP access",
+  "main": "server/server.js",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/start-platform.js --web",
+    "dev:web": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "vite",
-    "server": "json-server --watch db.json --port 3001",
-    "security-check": "node scripts/check-security.js"
+    "start": "node scripts/start-platform.js",
+    "start:platform": "node scripts/start-platform.js",
+    "start:gateway": "node server/server.js",
+    "start:knowledge": "node knowledge-plane/server.js",
+    "mcp:knowledge": "node knowledge-plane/mcp.js",
+    "server:chat-history": "json-server --watch db.json --port 3001",
+    "sync:knowledge": "node knowledge-plane/sync.js",
+    "test": "node --test && npm run eval:medical && npm run eval:translation && npm run verify:browser-boundary",
+    "check": "npm test && npm run build",
+    "visual:test": "node scripts/capture-ui.js",
+    "security-check": "node scripts/check-security.js",
+    "start:mcp-http": "node knowledge-plane/mcp-http.js",
+    "eval:medical": "node scripts/run-medical-evals.js",
+    "eval:translation": "node scripts/run-translation-evals.js",
+    "verify:browser-boundary": "node scripts/verify-no-browser-clinical-imports.js",
+    "rotate:user-data-key": "node scripts/rotate-user-data-key.js"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.24.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "clsx": "^2.0.0",
     "json-server": "^0.17.4",
     "lucide-react": "^0.294.0",
@@ -21,24 +38,28 @@
     "react-dom": "^18.2.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
-    "tailwind-merge": "^2.0.0"
+    "tailwind-merge": "^2.0.0",
+    "zod": "^3.25.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.37",
     "@types/react-dom": "^18.2.15",
     "@vitejs/plugin-react": "^4.1.1",
     "autoprefixer": "^10.4.16",
+    "playwright": "^1.54.0",
     "postcss": "^8.4.31",
     "tailwindcss": "^3.3.5",
     "vite": "^4.5.0"
   },
   "keywords": [
-    "chatbot",
-    "ai",
-    "openrouter",
-    "gemma",
+    "medical-ai",
+    "healthcare",
+    "mcp",
+    "knowledge-control-plane",
+    "pubmed",
+    "clinical-guidelines",
     "react"
   ],
   "author": "David Bisky",
-  "license": "MIT"
+  "license": "Apache-2.0"
 }

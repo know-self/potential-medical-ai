@@ -1,0 +1,8 @@
+[
+  {"id":"vi-diabetes","input":"Tôi bị đái tháo đường type 2","locale":"vi","expectedDisease":"type-2-diabetes"},
+  {"id":"vi-kidney","input":"Bệnh thận mạn và tiểu đường","locale":"vi","expectedDisease":"chronic-kidney-disease"},
+  {"id":"dose-preservation","input":"Metformin 500 mg hai lần mỗi ngày","locale":"vi","expectedDose":"500 mg"},
+  {"id":"unit-preservation","input":"Đường huyết 110 mg/dL","locale":"vi","expectedUnit":"mg/dL"},
+  {"id":"pregnancy-term","input":"Tôi đang mang thai và bị tăng huyết áp","locale":"vi","expectedDisease":"pregnancy-hypertension"},
+  {"id":"english-asthma","input":"I have asthma and use an inhaler","locale":"en","expectedDisease":"asthma"}
+]

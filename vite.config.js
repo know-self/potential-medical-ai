@@ -1,19 +1,20 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
 
 export default defineConfig({
-  base: 'https://davidbisky.io.vn/',
+  base: '/',
   plugins: [react()],
   resolve: {
-    alias: [
-      {
-        find: '@',
-        replacement: "./src"
-      }
-    ],
+    alias: [{ find: '@', replacement: './src' }]
   },
   server: {
     port: 3000,
-    open: true
+    open: true,
+    proxy: {
+      '/api': {
+        target: process.env.MEDICAL_API_PROXY_TARGET || 'http://localhost:8787',
+        changeOrigin: true
+      }
+    }
   }
-}) 
+});
