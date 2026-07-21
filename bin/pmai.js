@@ -4,7 +4,10 @@ const argv = process.argv.slice(2);
 const processCommands = new Set(['dev', 'host', 'doctor', 'status', 'sync']);
 
 try {
-  if (processCommands.has(argv[0])) {
+  if (process.platform === 'win32') {
+    const { runWindowsCli } = await import('../scripts/pmai-windows-runtime.js');
+    await runWindowsCli(argv);
+  } else if (processCommands.has(argv[0])) {
     const { runCli } = await import('../scripts/pmai-cli.js');
     await runCli(argv);
   } else {

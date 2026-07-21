@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, 'agent/**']
+    branches: [main, 'agent/**', 'fix/**']
   pull_request:
 
 permissions:
@@ -40,3 +40,22 @@ jobs:
           path: artifacts/ui-*.png
           if-no-files-found: error
           retention-days: 14
+
+  windows-cli-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - name: Windows CLI syntax and help
+        run: |
+          node --check scripts/pmai-windows-runtime.js
+          node --check scripts/service-bootstrap.js
+          node bin/pmai.js help
+          node bin/pmai.js doctor --json
+      - name: Windows runtime regression tests
+        run: node --test tests/windowsRuntime.test.js
+      - name: Build through direct Vite CLI
+        run: node node_modules/vite/bin/vite.js build
