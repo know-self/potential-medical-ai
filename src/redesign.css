@@ -131,10 +131,10 @@ button { cursor: pointer; }
   min-height: 0;
   overflow: hidden;
   display: grid;
-  grid-template-columns: 270px minmax(0, 1fr) 330px;
+  grid-template-columns: 270px minmax(0, 1fr);
 }
 .app-body.evidence-mode { grid-template-columns: 270px minmax(0, 1fr); }
-.navigation-rail, .desktop-control-preview, .conversation-pane, .evidence-workspace { min-width: 0; background: var(--panel); }
+.navigation-rail, .conversation-pane, .evidence-workspace { min-width: 0; background: var(--panel); }
 
 .navigation-rail { border-right: 1px solid var(--line); z-index: 20; }
 .rail-inner { height: 100%; display: flex; flex-direction: column; padding: 16px 12px; }
@@ -268,51 +268,6 @@ button { cursor: pointer; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* Permanent assistant rail */
-.assistant-control-rail { border-left: 1px solid var(--line); padding: 14px; overflow: auto; }
-.control-rail-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-.control-rail-title strong { display: block; font-size: 13px; }
-.control-rail-title span { display: block; font-size: 9px; color: var(--muted); margin-top: 2px; }
-.control-rail-title > button, .control-card-heading button, .share-card > button { border: 0; background: transparent; color: var(--blue); font-size: 10px; padding: 4px; }
-.control-card { border: 1px solid var(--line); border-radius: 12px; padding: 13px; margin-bottom: 9px; background: var(--panel); }
-.control-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
-.control-card-heading > span { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; text-transform: capitalize; }
-.control-card-heading b { min-width: 18px; height: 18px; border-radius: 9px; background: var(--panel-3); display: inline-grid; place-items: center; font-size: 9px; }
-.patient-card dl { margin: 0; display: grid; gap: 7px; }
-.patient-card dl > div { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 8px; }
-.patient-card dt { color: var(--muted); font-size: 9px; }
-.patient-card dd { margin: 0; color: var(--text); font-size: 10px; overflow-wrap: anywhere; }
-.consent-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.consent-card strong { display: block; font-size: 11px; }
-.consent-card span { display: block; font-size: 9px; color: var(--muted); margin-top: 3px; }
-.toggle-visual { width: 36px; height: 21px; border: 0; border-radius: 99px; padding: 3px; background: var(--line-strong); }
-.toggle-visual i { display: block; width: 15px; height: 15px; border-radius: 50%; background: #fff; transition: transform 0.18s ease; box-shadow: 0 2px 5px rgba(0,0,0,.15); }
-.toggle-visual.on { background: var(--blue); }
-.toggle-visual.on i { transform: translateX(15px); }
-.attachment-list { display: grid; gap: 7px; }
-.attachment-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) 14px; gap: 8px; align-items: center; padding: 8px; border: 1px solid var(--line); border-radius: 9px; }
-.file-tile, .pdf-tile { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; background: #fff0ed; color: #dc4d37; }
-.attachment-row strong { display: block; font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.attachment-row small { display: block; color: var(--muted); font-size: 8px; margin-top: 2px; }
-.attachment-row > svg { color: var(--green); }
-.empty-action { width: 100%; border: 1px dashed var(--line-strong); border-radius: 9px; background: var(--panel-2); color: var(--blue); padding: 10px; font-size: 10px; }
-.timeline-card ol, .timeline-workspace-card ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
-.timeline-card li { display: grid; grid-template-columns: 7px 58px minmax(0, 1fr); gap: 7px; align-items: start; }
-.timeline-card li > i, .timeline-workspace-card li > i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin-top: 3px; }
-.timeline-card time { font-size: 8px; color: var(--muted); }
-.timeline-card li strong { display: block; font-size: 9px; }
-.timeline-card li span { display: block; font-size: 8px; color: var(--muted); margin-top: 2px; }
-.empty-copy { margin: 0; color: var(--muted); font-size: 9px; }
-.share-card { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.share-card > div > span { display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 700; }
-.share-card small { display: block; color: var(--muted); font-size: 8px; margin-top: 3px; }
-.share-card > button { display: flex; align-items: center; gap: 2px; border: 1px solid #b8cdfb; border-radius: 8px; padding: 6px 8px; }
-.lab-preview { padding: 10px; border-radius: 9px; background: var(--panel-2); }
-.lab-preview strong, .lab-preview span { display: block; }
-.lab-preview strong { font-size: 9px; }
-.lab-preview span { color: var(--muted); font-size: 8px; line-height: 1.5; margin-top: 3px; }
-.lab-preview b { display: inline-block; margin-top: 8px; padding: 3px 6px; border-radius: 8px; color: var(--green); background: var(--green-soft); font-size: 8px; }
-
 /* Evidence / review workspace */
 .evidence-workspace { min-width: 0; display: grid; grid-template-columns: 280px minmax(0, 1fr); overflow: hidden; }
 .case-thread { min-width: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; border-right: 1px solid var(--line); background: var(--panel); }
@@ -419,7 +374,8 @@ button { cursor: pointer; }
 .secure-link span { font-size: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .secure-link button { border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--blue); padding: 5px 7px; font-size: 8px; }
 .timeline-workspace-card li { display: grid; grid-template-columns: 7px minmax(0, 1fr); gap: 8px; }
-.timeline-workspace-card ol { margin-top: 12px; }
+.timeline-workspace-card ol { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 8px; }
+.timeline-workspace-card li > i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin-top: 3px; }
 .timeline-workspace-card time, .timeline-workspace-card strong, .timeline-workspace-card span { display: block; }
 .timeline-workspace-card time { color: var(--green); font-size: 7px; }
 .timeline-workspace-card strong { font-size: 8px; margin-top: 2px; }
@@ -455,7 +411,6 @@ button { cursor: pointer; }
 @media (max-width: 1280px) {
   .app-body { grid-template-columns: 240px minmax(0, 1fr); }
   .app-body.evidence-mode { grid-template-columns: 240px minmax(0, 1fr); }
-  .assistant-control-rail { display: none; }
   .app-topbar { grid-template-columns: 240px minmax(200px, 1fr) auto; }
   .profile-chip div { display: none; }
   .evidence-layout { grid-template-columns: minmax(0, 1fr) 290px; }

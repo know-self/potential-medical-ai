@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import AssistantControlPanel from './components/AssistantControlPanel';
-import ChatControlRail from './components/ChatControlRail';
 import ChatHeader from './components/ChatHeader';
 import ChatInput from './components/ChatInput';
 import ChatMessage from './components/ChatMessage';
@@ -321,14 +320,6 @@ export default function App() {
               onOpenControls={() => setControlsOpen(true)}
             />
           </main>
-          <ChatControlRail
-            profile={workspaceData.profile}
-            uploads={workspaceData.uploads}
-            shares={workspaceData.shares}
-            selectedAttachmentIds={attachmentIds}
-            freshness={modelSettings.mode === 'knowledge-rag' ? freshness : null}
-            onManage={() => setControlsOpen(true)}
-          />
         </> : <EvidenceWorkspace
           messages={messages}
           uploads={evidenceUploads}
