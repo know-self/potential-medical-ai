@@ -129,6 +129,7 @@ button { cursor: pointer; }
 
 .app-body {
   min-height: 0;
+  overflow: hidden;
   display: grid;
   grid-template-columns: 270px minmax(0, 1fr) 330px;
 }
@@ -192,11 +193,14 @@ button { cursor: pointer; }
 .rail-footer { border: 0; padding-bottom: 0; }
 
 .conversation-pane {
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   background: linear-gradient(180deg, var(--panel), var(--panel-2));
 }
-.conversation-scroll { overflow: auto; padding: 26px 26px 10px; }
+.conversation-scroll { min-height: 0; min-width: 0; overflow: auto; padding: 26px 26px 10px; }
 .conversation-width { width: min(780px, 100%); margin: 0 auto; }
 .welcome-state { text-align: center; padding: 6vh 20px 20px; }
 .welcome-icon {
@@ -474,7 +478,7 @@ button { cursor: pointer; }
   .navigation-rail { position: fixed; inset: 58px auto 28px 0; width: 270px; z-index: 60; transform: translateX(-102%); transition: transform 0.2s ease; box-shadow: var(--shadow); }
   .navigation-rail.open { transform: translateX(0); }
   .mobile-scrim { display: block; position: fixed; inset: 58px 0 28px; border: 0; background: rgba(10, 20, 35, 0.35); z-index: 55; }
-  .conversation-pane { height: 100%; }
+  .conversation-pane { height: 100%; min-height: 0; }
   .conversation-scroll { padding: 16px 12px 6px; }
   .composer-shell { padding: 8px 10px 12px; }
   .prompt-grid, .trust-row { grid-template-columns: 1fr; }
