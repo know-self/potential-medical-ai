@@ -1,4 +1,4 @@
-const API_BASE_URL = String(import.meta.env.VITE_MEDICAL_API_URL || '').replace(/\/$/, '');
+const API_BASE_URL = String(import.meta.env?.VITE_MEDICAL_API_URL || '').replace(/\/$/, '');
 
 function apiUrl(path) {
   return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
@@ -125,6 +125,18 @@ function fileToBase64(file) {
   });
 }
 
+const MIME_BY_EXTENSION = Object.freeze({
+  pdf: 'application/pdf', txt: 'text/plain', json: 'application/json',
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg'
+});
+
+export function supportedMimeType(file) {
+  const supplied = String(file?.type || '').toLowerCase();
+  if (supplied && supplied !== 'application/octet-stream') return supplied;
+  const extension = String(file?.name || '').split('.').pop()?.toLowerCase();
+  return MIME_BY_EXTENSION[extension] || supplied || 'application/octet-stream';
+}
+
 async function downloadExport(token, format = 'fhir') {
   const response = await apiRequest(`/api/privacy/export?format=${encodeURIComponent(format)}`, { token, raw: true });
   const blob = await response.blob();
@@ -153,7 +165,7 @@ export const medicalApi = {
   uploadFile: async (token, file) => apiRequest('/api/uploads', {
     method: 'POST',
     token,
-    body: JSON.stringify({ filename: file.name, mimeType: file.type || 'application/octet-stream', contentBase64: await fileToBase64(file) })
+    body: JSON.stringify({ filename: file.name, mimeType: supportedMimeType(file), contentBase64: await fileToBase64(file) })
   }),
   deleteUpload: (token, id) => apiRequest(`/api/uploads/${encodeURIComponent(id)}`, { method: 'DELETE', token }),
   createShare: (token, payload) => apiRequest('/api/shares', { method: 'POST', token, body: JSON.stringify(payload) }),

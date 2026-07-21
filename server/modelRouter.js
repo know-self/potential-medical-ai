@@ -21,6 +21,19 @@ export function classifyModelTask({ question = '', knowledge = {}, attachments =
   };
 }
 
+export function planRetrieval({ question = '', attachments = [] } = {}) {
+  const text = String(question).trim().toLowerCase();
+  const greeting = /^(?:hi|hello|hey|thanks|thank you|good (?:morning|afternoon|evening)|xin ch[aà]o|cảm ơn)[.!?\s]*$/iu.test(text);
+  const evidenceSensitive = /\b(?:evidence|source|citation|cite|guideline|recommend(?:ation)?|medication|medicine|drug|treatment|diagnos(?:is|e)|dos(?:e|age)|clinical|study|research|bằng chứng|nguồn|trích dẫn|hướng dẫn|khuyến nghị|thuốc|điều trị|chẩn đoán|liều)\b/iu.test(text);
+  const highSensitivity = classifyModelTask({ question, attachments }).highSensitivity;
+  return {
+    documentsUsed: attachments.length > 0,
+    knowledgeUsed: !greeting && (highSensitivity || evidenceSensitive),
+    knowledgeFallback: false,
+    classification: greeting ? 'simple-conversation' : highSensitivity ? 'high-sensitivity-medical' : evidenceSensitive ? 'evidence-sensitive' : 'general-conversation'
+  };
+}
+
 export function providerOrder(task, modelSettings = {}) {
   try {
     const normalized = normalizeModelSettings(modelSettings);
@@ -40,7 +53,7 @@ export async function generateRoutedResponse({ messages, prompt, question, knowl
   const key = cacheKey({
     prompt: JSON.stringify(messages || [{ role: 'user', content: prompt }]),
     knowledgeUpdatedAt: knowledge.knowledgeUpdatedAt || '',
-    task: `${task.type}:${normalized.endpointHost}:${normalized.model}:${normalized.mode}`
+    task: `${task.type}:${normalized.endpointHost}:${normalized.model}`
   });
   const cached = cacheable ? getCachedResponse(key) : null;
   if (cached) {

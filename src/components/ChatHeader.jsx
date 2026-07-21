@@ -8,7 +8,7 @@ export default function ChatHeader({ onClearChat, hasMessages, onToggleSidebar, 
       <div className="brand-block">
         <button className="icon-button mobile-only" onClick={onToggleSidebar} aria-label="Open navigation"><Menu size={18}/></button>
         <div className="brand-mark"><HeartPulse size={19}/></div>
-        <div><strong>Potential Medical AI</strong><span>Evidence-grounded assistant</span></div>
+        <div><strong>Potential Medical AI</strong><span>Automatic evidence routing</span></div>
       </div>
 
       <div className={`freshness-pill ${fresh ? 'is-fresh' : ''}`}>

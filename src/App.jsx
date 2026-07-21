@@ -30,6 +30,7 @@ export default function App() {
   const [sessionToken, setSessionToken] = useState(() => sessionStorage.getItem('medical-user-session') || '');
   const [modelSettings, setModelSettings] = useState(() => loadModelSettings());
   const [attachmentIds, setAttachmentIds] = useState([]);
+  const [attachmentItems, setAttachmentItems] = useState([]);
   const [workspaceData, setWorkspaceData] = useState(emptySessionWorkspace);
   const endRef = useRef(null);
 
@@ -81,6 +82,7 @@ export default function App() {
     setSessionToken('');
     sessionStorage.removeItem('medical-user-session');
     setAttachmentIds([]);
+    setAttachmentItems([]);
     setWorkspaceData(emptySessionWorkspace);
     if (notice) setSessionNotice(notice);
   }, []);
@@ -92,6 +94,7 @@ export default function App() {
     else {
       sessionStorage.removeItem('medical-user-session');
       setAttachmentIds([]);
+      setAttachmentItems([]);
       setWorkspaceData(emptySessionWorkspace);
     }
     setSessionNotice('');
@@ -102,7 +105,7 @@ export default function App() {
     setModelSettings(next);
     setConnectionError('');
     setSessionNotice(value
-      ? `Custom model saved for this tab: ${next.model} · ${next.mode}.`
+      ? `Custom model saved for this tab: ${next.model}.`
       : 'Custom model settings were cleared from this tab.');
   }, []);
 
@@ -223,15 +226,68 @@ export default function App() {
     setChats((previous) => [chat, ...previous]);
     setCurrentChatId(chat.id);
     setMessages([]);
+    setAttachmentIds([]);
+    setAttachmentItems([]);
     setActiveView('chat');
     setSidebarOpen(false);
   };
 
   const selectChat = async (id) => {
     setMessages(await historyService.getChatMessages(id));
+    const chat = chats.find((item) => item.id === id);
+    const ids = Array.isArray(chat?.attachmentIds) ? chat.attachmentIds.slice(0, 8) : [];
+    setAttachmentIds(ids);
+    setAttachmentItems(workspaceData.uploads.filter((item) => ids.includes(item.id)).map((item) => ({ ...item, status: item.extraction?.warning ? 'warning' : 'ready' })));
     setCurrentChatId(id);
     setActiveView('chat');
     setSidebarOpen(false);
+  };
+
+  const persistAttachments = async (ids, chatId = currentChatId) => {
+    const targetId = chatId || await ensureChat();
+    await historyService.updateChatAttachments(targetId, ids);
+    setChats((previous) => previous.map((chat) => chat.id === targetId ? { ...chat, attachmentIds: ids } : chat));
+  };
+
+  const selectFiles = async (fileList) => {
+    const files = [...(fileList || [])];
+    const available = Math.max(0, 8 - attachmentItems.filter((item) => item.status !== 'failed').length);
+    if (files.length > available) setSessionNotice(`Only ${available} more attachment${available === 1 ? '' : 's'} can be added (eight maximum).`);
+    const targetChatId = files.slice(0, available).some((file) => file.size <= 10 * 1024 * 1024)
+      ? (currentChatId || await ensureChat())
+      : currentChatId;
+    for (const file of files.slice(0, available)) {
+      const localId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      if (file.size > 10 * 1024 * 1024) {
+        setAttachmentItems((previous) => [...previous, { localId, filename: file.name, status: 'failed', error: 'File exceeds the 10 MB limit.' }]);
+        continue;
+      }
+      setAttachmentItems((previous) => [...previous, { localId, filename: file.name, status: 'uploading' }]);
+      try {
+        const uploaded = await medicalApi.uploadFile(sessionToken, file);
+        const status = uploaded.extraction?.warning ? 'warning' : 'ready';
+        setAttachmentItems((previous) => previous.map((item) => item.localId === localId ? { ...uploaded, localId, status } : item));
+        setAttachmentIds((previous) => {
+          const next = [...previous, uploaded.id].slice(0, 8);
+          persistAttachments(next, targetChatId).catch((error) => setSessionNotice(error.message));
+          return next;
+        });
+      } catch (error) {
+        if (isAuthenticationError(error)) clearSession('Secure session expired. Verify a new session, then click the paperclip again.');
+        setAttachmentItems((previous) => previous.map((item) => item.localId === localId ? { ...item, status: 'failed', error: error.message } : item));
+      }
+    }
+    refreshWorkspaceData();
+  };
+
+  const removeAttachment = (attachment) => {
+    setAttachmentItems((previous) => previous.filter((item) => (item.localId || item.id) !== (attachment.localId || attachment.id)));
+    if (!attachment.id) return;
+    setAttachmentIds((previous) => {
+      const next = previous.filter((id) => id !== attachment.id);
+      persistAttachments(next).catch((error) => setSessionNotice(error.message));
+      return next;
+    });
   };
 
   const deleteChat = async (id) => {
@@ -240,6 +296,8 @@ export default function App() {
     if (id === currentChatId) {
       setCurrentChatId(null);
       setMessages([]);
+      setAttachmentIds([]);
+      setAttachmentItems([]);
     }
   };
 
@@ -272,7 +330,6 @@ export default function App() {
   const freshness = platformStatus?.knowledge?.freshness;
   const selectedUploads = workspaceData.uploads.filter((item) => attachmentIds.includes(item.id));
   const evidenceUploads = selectedUploads.length ? selectedUploads : workspaceData.uploads;
-  const modeLabel = modelSettings.mode === 'knowledge-rag' ? 'Knowledge RAG' : modelSettings.mode === 'document-rag' ? 'Document RAG' : 'Direct Model';
 
   return (
     <div className="medical-app">
@@ -282,7 +339,7 @@ export default function App() {
         onToggleSidebar={() => setSidebarOpen((value) => !value)}
         theme={theme}
         onToggleTheme={() => setTheme(toggleTheme())}
-        freshness={modelSettings.mode === 'knowledge-rag' ? freshness : null}
+        freshness={freshness}
         onOpenControls={() => setControlsOpen(true)}
       />
 
@@ -316,8 +373,12 @@ export default function App() {
               isLoading={isLoading}
               disabled={!ready}
               exampleMessage={example}
-              placeholder={!modelReady ? 'Configure a custom model in Assistant controls…' : gatewayReady ? `Ask using ${modeLabel}…` : 'Waiting for local safety gateway…'}
-              onOpenControls={() => setControlsOpen(true)}
+              placeholder={!modelReady ? 'Configure a custom model in Assistant controls…' : gatewayReady ? 'Ask a medical question…' : 'Waiting for local safety gateway…'}
+              authenticated={Boolean(sessionToken)}
+              attachments={attachmentItems}
+              onSelectFiles={selectFiles}
+              onRemoveAttachment={removeAttachment}
+              onAuthenticationRequired={() => { setControlsOpen(true); setSessionNotice('Verify a secure session, then click the paperclip again to choose files.'); }}
             />
           </main>
         </> : <EvidenceWorkspace
@@ -331,7 +392,7 @@ export default function App() {
         />}
       </div>
 
-      <footer className="app-footer"><span>{modeLabel}</span><i/><span>Custom OpenAI-compatible endpoint</span><i/><span>Safety gateway · no stored provider key</span></footer>
+      <footer className="app-footer"><span>Automatic evidence routing</span><i/><span>Custom OpenAI-compatible endpoint</span><i/><span>Safety gateway · no stored provider key</span></footer>
 
       <AssistantControlPanel
         open={controlsOpen}
@@ -341,8 +402,6 @@ export default function App() {
         modelSettings={modelSettings}
         onModelSettingsChange={changeModelSettings}
         messages={messages}
-        selectedAttachmentIds={attachmentIds}
-        onSelectedAttachmentIdsChange={setAttachmentIds}
       />
 
       {sessionNotice && <div className="toast-error session-warning"><strong>Assistant settings</strong><span>{sessionNotice}</span></div>}

@@ -10,6 +10,7 @@ import {
   modelSettingsReady,
   saveModelSettings
 } from '../src/services/modelSettings.js';
+import { supportedMimeType } from '../src/services/apiClient.js';
 
 function memoryStorage() {
   const values = new Map();
@@ -52,9 +53,16 @@ test('browser model settings stay scoped to supplied session storage', () => {
     mode: 'direct'
   }, storage);
   assert.equal(modelSettingsReady(saved), true);
+  assert.equal(Object.hasOwn(saved, 'mode'), false);
   assert.equal(loadModelSettings(storage).apiKey, 'tab-only-key');
   assert.equal(clearModelSettings(storage).endpoint, '');
   assert.equal(modelSettingsReady(loadModelSettings(storage)), false);
+});
+
+test('browser upload MIME inference supports approved extensions with generic types', () => {
+  assert.equal(supportedMimeType({ name: 'scan.JPEG', type: '' }), 'image/jpeg');
+  assert.equal(supportedMimeType({ name: 'report.pdf', type: 'application/octet-stream' }), 'application/pdf');
+  assert.equal(supportedMimeType({ name: 'notes.txt', type: '' }), 'text/plain');
 });
 
 test('custom model runtime streams an OpenAI-compatible response through loopback', async (t) => {

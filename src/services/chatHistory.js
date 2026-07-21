@@ -27,7 +27,8 @@ export class ChatHistoryService {
         title,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        messageCount: 0
+        messageCount: 0,
+        attachmentIds: []
       };
 
       const response = await fetch(`${this.baseUrl}/chats`, {
@@ -47,6 +48,16 @@ export class ChatHistoryService {
       console.error('Error creating chat:', error);
       throw error;
     }
+  }
+
+  async updateChatAttachments(chatId, attachmentIds) {
+    const response = await fetch(`${this.baseUrl}/chats/${chatId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ attachmentIds: [...new Set(attachmentIds)].slice(0, 8), updatedAt: new Date().toISOString() })
+    });
+    if (!response.ok) throw new Error('Failed to update chat attachments');
+    return response.json();
   }
 
   // Get messages for a specific chat
@@ -223,4 +234,4 @@ export class ChatHistoryService {
       throw error;
     }
   }
-} 
+}

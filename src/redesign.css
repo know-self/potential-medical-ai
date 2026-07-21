@@ -256,6 +256,13 @@ button { cursor: pointer; }
 @keyframes pulse { 50% { opacity: 0.25; transform: translateY(-2px); } }
 
 .composer-shell { padding: 12px 26px 18px; background: linear-gradient(180deg, transparent, var(--panel) 28%); }
+.attachment-chips { width: min(780px, 100%); margin: 0 auto 7px; display: flex; gap: 6px; overflow-x: auto; padding: 2px; }
+.attachment-chip { flex: 0 0 auto; max-width: 240px; display: flex; align-items: center; gap: 5px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--text); font-size: 11px; }
+.attachment-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-chip small { color: var(--muted); }
+.attachment-chip.is-failed, .attachment-chip.is-warning { color: #b45309; border-color: #f59e0b; }
+.attachment-chip.is-failed { color: #b91c1c; border-color: #ef4444; }
+.attachment-chip button { border: 0; background: transparent; color: currentColor; padding: 1px; }
 .composer { width: min(780px, 100%); margin: auto; display: flex; align-items: flex-end; gap: 8px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 15px; background: var(--panel); box-shadow: 0 12px 32px rgba(20, 37, 63, 0.1); }
 .composer-field { flex: 1; min-width: 0; }
 .composer textarea { display: block; width: 100%; max-height: 144px; resize: none; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 13px; padding: 5px 2px; }

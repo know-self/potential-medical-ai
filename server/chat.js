@@ -1,6 +1,6 @@
 import { consumeTenantBudget } from './capacity.js';
 import { knowledgePlane } from './knowledgeClient.js';
-import { generateRoutedResponse } from './modelRouter.js';
+import { generateRoutedResponse, planRetrieval } from './modelRouter.js';
 import { normalizeModelSettings } from './models.js';
 import { assessMedicalSafety, buildSafetyResponse, detectLocale } from './safety.js';
 
@@ -101,18 +101,18 @@ function recentMessages(history, question) {
   return recent;
 }
 
-function buildModelMessages({ question, history, settings, knowledge, patientContext, attachments }) {
+export function buildModelMessages({ question, history, settings, knowledge, patientContext, attachments }) {
   const sections = [];
   if (settings.includePatientContext && patientContext) {
     sections.push(`USER-CONFIRMED CONTEXT (unverified; do not diagnose from it):\n${JSON.stringify(patientContext, null, 2)}`);
   }
-  if (settings.mode === 'knowledge-rag') {
+  if ((knowledge.results || []).length) {
     sections.push(`VERSIONED KNOWLEDGE:\n${evidenceText(knowledge) || 'No matching knowledge was found.'}`);
     sections.push(`KNOWLEDGE FRESHNESS: ${knowledge?.freshness?.level || 'unknown'}; checked ${knowledge?.freshness?.checkedAt || 'unknown'}`);
     sections.push(`EVIDENCE CONFLICTS:\n${conflictText(knowledge?.conflicts || [])}`);
     sections.push('Use citation markers [K1], [K2], etc. only for claims supported by the supplied versioned knowledge.');
   }
-  if (settings.mode !== 'direct' && attachments.length) {
+  if (attachments.length) {
     sections.push(`UPLOADED DOCUMENTS:\n${attachmentText(attachments)}`);
     sections.push('Use [D1], [D2], etc. only for statements supported by the supplied extraction. Mention low extraction confidence explicitly.');
   }
@@ -142,7 +142,8 @@ export async function streamMedicalChat(body, response, context = {}) {
   if (!question) throw new Error('message is required');
   const history = Array.isArray(body.history) ? body.history.slice(-20) : [];
   const settings = normalizeModelSettings(body.model || {});
-  const selectedAttachments = settings.mode === 'direct' ? [] : (Array.isArray(context.attachments) ? context.attachments : []);
+  const selectedAttachments = Array.isArray(context.attachments) ? context.attachments : [];
+  const route = planRetrieval({ question, attachments: selectedAttachments });
   const patientContext = settings.includePatientContext ? context.patientContext || null : null;
   consumeTenantBudget(context.tenantId || 'anonymous', question.length + history.reduce((sum, item) => sum + String(item.content || '').length, 0));
 
@@ -157,17 +158,24 @@ export async function streamMedicalChat(body, response, context = {}) {
   if (safety.level !== 'normal') {
     const text = buildSafetyResponse(safety, detectLocale(question));
     sse(response, { type: 'chunk', text }, 'chunk');
-    sse(response, { type: 'done', safety, citations: [], freshness: null, mode: settings.mode }, 'done');
+    sse(response, { type: 'done', safety, citations: [], freshness: null, route }, 'done');
     response.end();
     return;
   }
 
   try {
     const locale = body.locale || detectLocale(question);
-    const knowledge = settings.mode === 'knowledge-rag'
-      ? await knowledgePlane.search(question, { limit: 8, maxEvidenceTier: 4, locale })
-      : { results: [], conflicts: [], freshness: null, knowledgeUpdatedAt: '' };
-    const citations = settings.mode === 'knowledge-rag' ? citationLines(knowledge.results) : [];
+    let knowledge = { results: [], conflicts: [], freshness: null, knowledgeUpdatedAt: '' };
+    if (route.knowledgeUsed) {
+      try {
+        knowledge = await knowledgePlane.search(question, { limit: 8, maxEvidenceTier: 4, locale });
+      } catch (error) {
+        if (!(error.code === 'KNOWLEDGE_STALE' || /stale|synchron|unavailable|fetch|connect|network|timeout/i.test(error.message))) throw error;
+        route.knowledgeFallback = true;
+        route.knowledgeUsed = false;
+      }
+    }
+    const citations = route.knowledgeUsed ? citationLines(knowledge.results) : [];
     const messages = buildModelMessages({
       question,
       history,
@@ -186,13 +194,13 @@ export async function streamMedicalChat(body, response, context = {}) {
       onChunk: (chunk) => sse(response, { type: 'chunk', text: chunk }, 'chunk')
     });
 
-    if (settings.mode === 'knowledge-rag') {
+    if (route.knowledgeUsed) {
       sse(response, { type: 'chunk', text: sourceAppendix(citations, knowledge.freshness, knowledge.conflicts) }, 'chunk');
     }
     sse(response, {
       type: 'done',
       safety,
-      mode: settings.mode,
+      route,
       citations,
       freshness: knowledge.freshness,
       conflicts: knowledge.conflicts || [],
@@ -207,9 +215,7 @@ export async function streamMedicalChat(body, response, context = {}) {
     }, 'done');
     response.end();
   } catch (error) {
-    const text = settings.mode === 'knowledge-rag' && (error.code === 'KNOWLEDGE_STALE' || /stale|synchron/i.test(error.message))
-      ? 'Nguồn kiến thức y khoa bắt buộc đang cũ hoặc chưa đồng bộ. Hãy chuyển sang Direct Model hoặc thử Knowledge RAG sau khi đồng bộ.'
-      : `Custom model request failed: ${error.message}`;
+    const text = `Custom model request failed: ${error.message}`;
     sse(response, { type: 'chunk', text }, 'chunk');
     sse(response, { type: 'error', error: error.message, code: error.code || null }, 'error');
     response.end();

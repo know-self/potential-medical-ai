@@ -19,8 +19,6 @@ export default function AssistantControlPanel({
   modelSettings,
   onModelSettingsChange,
   messages,
-  selectedAttachmentIds,
-  onSelectedAttachmentIdsChange
 }) {
   const [tokenDraft, setTokenDraft] = useState(token);
   const [modelDraft, setModelDraft] = useState(modelSettings || defaultModelSettings);
@@ -55,7 +53,6 @@ export default function AssistantControlPanel({
     setProfile(null);
     setUploads([]);
     setShares([]);
-    onSelectedAttachmentIdsChange([]);
   }
 
   function applyProfile(nextProfile) {
@@ -131,7 +128,7 @@ export default function AssistantControlPanel({
       if (!next.endpoint || !next.model) throw new Error('Endpoint and model are required');
       onModelSettingsChange(next);
       setModelDraft(next);
-      setStatus(`Custom model saved for this tab: ${next.model} · ${next.mode}.`);
+      setStatus(`Custom model saved for this tab: ${next.model}.`);
     } catch (error) {
       setStatus(error.message);
     }
@@ -141,7 +138,7 @@ export default function AssistantControlPanel({
     setModelDraft({ ...defaultModelSettings });
     setCustomHeadersText('');
     onModelSettingsChange(null);
-    setStatus('Custom model endpoint, key, and mode were cleared from this tab.');
+    setStatus('Custom model endpoint and key were cleared from this tab.');
   }
 
   useEffect(() => {
@@ -171,21 +168,6 @@ export default function AssistantControlPanel({
       setStatus('Patient-provided context saved.');
     } catch (error) {
       handlePrivateError(error);
-    }
-  }
-
-  async function upload(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    try {
-      setStatus('Uploading and extracting…');
-      await medicalApi.uploadFile(token, file);
-      await refresh();
-      setStatus('Upload stored with extraction metadata.');
-    } catch (error) {
-      handlePrivateError(error);
-    } finally {
-      event.target.value = '';
     }
   }
 
@@ -243,7 +225,7 @@ export default function AssistantControlPanel({
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-lg font-semibold">Assistant controls</h2>
-            <p className="text-xs text-gray-500">Choose any OpenAI-compatible model, then optionally add documents, knowledge RAG, and consented context.</p>
+            <p className="text-xs text-gray-500">Configure a model and secure session. Evidence routing is automatic.</p>
           </div>
           <button className="px-3 py-1 rounded border" onClick={onClose}>Close</button>
         </div>
@@ -251,13 +233,6 @@ export default function AssistantControlPanel({
         <section className="border rounded-lg p-3 mb-4">
           <h3 className="font-medium">Custom model runtime</h3>
           <p className="text-xs text-gray-500 mb-3">The endpoint, model, API key, and headers are stored only in this browser tab. The key is forwarded through the local safety gateway for each request and is never written to server storage.</p>
-          <label className="block text-xs mb-2">Answer mode
-            <select className="w-full border rounded p-2 mt-1" value={modelDraft.mode} onChange={(event) => setModelDraft((previous) => ({ ...previous, mode: event.target.value }))}>
-              <option value="direct">Direct Model — no Knowledge Plane</option>
-              <option value="document-rag">Document RAG — selected uploads only</option>
-              <option value="knowledge-rag">Knowledge RAG — versioned knowledge + uploads</option>
-            </select>
-          </label>
           <label className="block text-xs mb-2">OpenAI-compatible endpoint
             <input className="w-full border rounded p-2 mt-1" value={modelDraft.endpoint} onChange={(event) => setModelDraft((previous) => ({ ...previous, endpoint: event.target.value }))} placeholder="https://api.example.com/v1/chat/completions" autoComplete="off" />
           </label>
@@ -295,7 +270,7 @@ export default function AssistantControlPanel({
         <section className="border rounded-lg p-3 mb-4">
           <h3 className="font-medium">Secure session</h3>
           <p className="text-xs text-gray-500 mb-2">Paste a short-lived user session token. It is verified once before being committed to sessionStorage; typing never sends partial tokens.</p>
-          <input className="w-full border rounded p-2" type="password" value={tokenDraft} onChange={(event) => setTokenDraft(event.target.value)} placeholder="User session token" autoComplete="off" />
+          <input className="w-full border rounded p-2" type="password" value={tokenDraft} onChange={(event) => setTokenDraft(event.target.value)} placeholder="User session token" autoComplete="off" autoFocus={!authenticated} />
           <div className="flex gap-2 mt-2">
             <button className="px-3 py-2 rounded bg-blue-700 text-white" disabled={!tokenDraft.trim()} onClick={applySession}>Verify and use</button>
             <button className="px-3 py-2 border rounded" disabled={!authenticated && !tokenDraft} onClick={() => { setTokenDraft(''); onTokenChange(''); resetPrivateState(); setStatus('Secure session cleared.'); }}>Clear</button>
@@ -314,25 +289,6 @@ export default function AssistantControlPanel({
             </label>
           ))}
           <button className="px-3 py-2 rounded bg-blue-700 text-white" disabled={!authenticated} onClick={saveContext}>Save context</button>
-        </section>
-
-        <section className="border rounded-lg p-3 mb-4">
-          <h3 className="font-medium">Evidence uploads</h3>
-          <p className="text-xs text-gray-500">Selected uploads are sent to the model only in Document RAG or Knowledge RAG mode.</p>
-          <input className="my-2" type="file" accept="text/plain,application/json,application/pdf,image/png,image/jpeg" disabled={!authenticated} onChange={upload} />
-          <div className="space-y-2">
-            {uploads.map((item) => (
-              <label key={item.id} className="block border rounded p-2 text-xs">
-                <input
-                  type="checkbox"
-                  checked={selectedAttachmentIds.includes(item.id)}
-                  onChange={(event) => onSelectedAttachmentIdsChange(event.target.checked
-                    ? [...selectedAttachmentIds, item.id]
-                    : selectedAttachmentIds.filter((id) => id !== item.id))}
-                />{' '}{item.filename} — {item.extraction?.status}, confidence {item.extraction?.confidence ?? 'n/a'}
-              </label>
-            ))}
-          </div>
         </section>
 
         <section className="border rounded-lg p-3 mb-4">
