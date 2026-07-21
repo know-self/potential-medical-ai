@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, 'agent/**', 'fix/**']
+    branches: [main, 'agent/**', 'fix/**', 'feature/**']
   pull_request:
 
 permissions:
@@ -27,7 +27,18 @@ jobs:
           node bin/pmai.js doctor --json
       - name: Import MCP runtime modules
         run: node -e "await import('./knowledge-plane/mcp.js'); await import('./knowledge-plane/mcp-http.js')"
-      - run: npm test
+      - name: Test and evaluations
+        shell: bash
+        run: |
+          set +e
+          npm test > test-output.log 2>&1
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "Tests failed. Last 200 lines:"
+            tail -n 200 test-output.log
+            exit "$code"
+          fi
+          cat test-output.log
       - run: npm run build
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
@@ -56,6 +67,6 @@ jobs:
           node bin/pmai.js help
           node bin/pmai.js doctor --json
       - name: Windows runtime regression tests
-        run: node --test tests/windowsRuntime.test.js
+        run: node --test tests/windowsRuntime.test.js tests/custom-model-runtime.test.js
       - name: Build through direct Vite CLI
         run: node node_modules/vite/bin/vite.js build
