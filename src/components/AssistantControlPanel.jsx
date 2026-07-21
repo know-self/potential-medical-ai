@@ -1,9 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { isAuthenticationError, medicalApi } from '../services/apiClient';
+import { defaultModelSettings, normalizeModelSettings } from '../services/modelSettings';
 import { loadSessionWorkspace } from '../services/sessionWorkspace';
 
 function splitList(value) {
   return String(value || '').split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function headersText(headers = {}) {
+  return Object.keys(headers).length ? JSON.stringify(headers, null, 2) : '';
 }
 
 export default function AssistantControlPanel({
@@ -11,11 +16,15 @@ export default function AssistantControlPanel({
   onClose,
   token,
   onTokenChange,
+  modelSettings,
+  onModelSettingsChange,
   messages,
   selectedAttachmentIds,
   onSelectedAttachmentIdsChange
 }) {
   const [tokenDraft, setTokenDraft] = useState(token);
+  const [modelDraft, setModelDraft] = useState(modelSettings || defaultModelSettings);
+  const [customHeadersText, setCustomHeadersText] = useState(headersText(modelSettings?.headers));
   const [profile, setProfile] = useState(null);
   const [uploads, setUploads] = useState([]);
   const [shares, setShares] = useState([]);
@@ -36,8 +45,11 @@ export default function AssistantControlPanel({
   }), [contextForm]);
 
   useEffect(() => {
-    if (open) setTokenDraft(token);
-  }, [open, token]);
+    if (!open) return;
+    setTokenDraft(token);
+    setModelDraft(modelSettings || defaultModelSettings);
+    setCustomHeadersText(headersText(modelSettings?.headers));
+  }, [open, token, modelSettings]);
 
   function resetPrivateState() {
     setProfile(null);
@@ -109,6 +121,27 @@ export default function AssistantControlPanel({
       }
       setStatus(error.message);
     }
+  }
+
+  function saveModel() {
+    try {
+      const headers = customHeadersText.trim() ? JSON.parse(customHeadersText) : {};
+      if (!headers || typeof headers !== 'object' || Array.isArray(headers)) throw new Error('Custom headers must be a JSON object');
+      const next = normalizeModelSettings({ ...modelDraft, headers });
+      if (!next.endpoint || !next.model) throw new Error('Endpoint and model are required');
+      onModelSettingsChange(next);
+      setModelDraft(next);
+      setStatus(`Custom model saved for this tab: ${next.model} · ${next.mode}.`);
+    } catch (error) {
+      setStatus(error.message);
+    }
+  }
+
+  function clearModel() {
+    setModelDraft({ ...defaultModelSettings });
+    setCustomHeadersText('');
+    onModelSettingsChange(null);
+    setStatus('Custom model endpoint, key, and mode were cleared from this tab.');
   }
 
   useEffect(() => {
@@ -210,10 +243,54 @@ export default function AssistantControlPanel({
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-lg font-semibold">Assistant controls</h2>
-            <p className="text-xs text-gray-500">Chat remains the primary product. These controls add consented context and evidence.</p>
+            <p className="text-xs text-gray-500">Choose any OpenAI-compatible model, then optionally add documents, knowledge RAG, and consented context.</p>
           </div>
           <button className="px-3 py-1 rounded border" onClick={onClose}>Close</button>
         </div>
+
+        <section className="border rounded-lg p-3 mb-4">
+          <h3 className="font-medium">Custom model runtime</h3>
+          <p className="text-xs text-gray-500 mb-3">The endpoint, model, API key, and headers are stored only in this browser tab. The key is forwarded through the local safety gateway for each request and is never written to server storage.</p>
+          <label className="block text-xs mb-2">Answer mode
+            <select className="w-full border rounded p-2 mt-1" value={modelDraft.mode} onChange={(event) => setModelDraft((previous) => ({ ...previous, mode: event.target.value }))}>
+              <option value="direct">Direct Model — no Knowledge Plane</option>
+              <option value="document-rag">Document RAG — selected uploads only</option>
+              <option value="knowledge-rag">Knowledge RAG — versioned knowledge + uploads</option>
+            </select>
+          </label>
+          <label className="block text-xs mb-2">OpenAI-compatible endpoint
+            <input className="w-full border rounded p-2 mt-1" value={modelDraft.endpoint} onChange={(event) => setModelDraft((previous) => ({ ...previous, endpoint: event.target.value }))} placeholder="https://api.example.com/v1/chat/completions" autoComplete="off" />
+          </label>
+          <label className="block text-xs mb-2">Model
+            <input className="w-full border rounded p-2 mt-1" value={modelDraft.model} onChange={(event) => setModelDraft((previous) => ({ ...previous, model: event.target.value }))} placeholder="your-model-name" autoComplete="off" />
+          </label>
+          <label className="block text-xs mb-2">API key
+            <input className="w-full border rounded p-2 mt-1" type="password" value={modelDraft.apiKey} onChange={(event) => setModelDraft((previous) => ({ ...previous, apiKey: event.target.value }))} placeholder="Optional for local models" autoComplete="off" />
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block text-xs mb-2">Temperature
+              <input className="w-full border rounded p-2 mt-1" type="number" min="0" max="2" step="0.05" value={modelDraft.temperature} onChange={(event) => setModelDraft((previous) => ({ ...previous, temperature: event.target.value }))} />
+            </label>
+            <label className="block text-xs mb-2">Max output tokens
+              <input className="w-full border rounded p-2 mt-1" type="number" min="64" max="32768" step="64" value={modelDraft.maxTokens} onChange={(event) => setModelDraft((previous) => ({ ...previous, maxTokens: event.target.value }))} />
+            </label>
+          </div>
+          <label className="flex items-center gap-2 text-xs mb-2">
+            <input type="checkbox" checked={modelDraft.includePatientContext} onChange={(event) => setModelDraft((previous) => ({ ...previous, includePatientContext: event.target.checked }))} />
+            Include consented patient context in model prompts
+          </label>
+          <label className="block text-xs mb-2">Additional system instruction
+            <textarea className="w-full border rounded p-2 mt-1 h-20" value={modelDraft.systemPrompt} onChange={(event) => setModelDraft((previous) => ({ ...previous, systemPrompt: event.target.value }))} placeholder="Optional style or domain instruction. Core medical safety rules remain enforced." />
+          </label>
+          <label className="block text-xs mb-2">Additional request headers (JSON)
+            <textarea className="w-full border rounded p-2 mt-1 h-20 font-mono" value={customHeadersText} onChange={(event) => setCustomHeadersText(event.target.value)} placeholder='{"x-api-version":"2026-01"}' />
+          </label>
+          <p className="text-[11px] text-amber-700 dark:text-amber-300 mb-2">Use only endpoints you trust. Public remote endpoints must use HTTPS. Loopback HTTP is allowed for local runtimes such as LM Studio, Ollama-compatible proxies, or vLLM.</p>
+          <div className="flex gap-2">
+            <button className="px-3 py-2 rounded bg-blue-700 text-white" disabled={!String(modelDraft.endpoint || '').trim() || !String(modelDraft.model || '').trim()} onClick={saveModel}>Save for this tab</button>
+            <button className="px-3 py-2 border rounded" onClick={clearModel}>Clear</button>
+          </div>
+        </section>
 
         <section className="border rounded-lg p-3 mb-4">
           <h3 className="font-medium">Secure session</h3>
@@ -241,6 +318,7 @@ export default function AssistantControlPanel({
 
         <section className="border rounded-lg p-3 mb-4">
           <h3 className="font-medium">Evidence uploads</h3>
+          <p className="text-xs text-gray-500">Selected uploads are sent to the model only in Document RAG or Knowledge RAG mode.</p>
           <input className="my-2" type="file" accept="text/plain,application/json,application/pdf,image/png,image/jpeg" disabled={!authenticated} onChange={upload} />
           <div className="space-y-2">
             {uploads.map((item) => (
