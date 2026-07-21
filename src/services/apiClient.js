@@ -1,4 +1,4 @@
-const API_BASE_URL = String(import.meta.env.VITE_MEDICAL_API_URL || '').replace(/\/$/, '');
+const API_BASE_URL = String(import.meta.env?.VITE_MEDICAL_API_URL || '').replace(/\/$/, '');
 
 function apiUrl(path) {
   return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
@@ -64,6 +64,29 @@ async function gatewayHealth() {
   };
 }
 
+export function parseGatewaySseBuffer(value = '', { final = false } = {}) {
+  const blocks = String(value).split(/\r?\n\r?\n/);
+  let rest = blocks.pop() || '';
+  if (final && rest.trim()) {
+    blocks.push(rest);
+    rest = '';
+  }
+  const events = [];
+  for (const block of blocks) {
+    const data = block.split(/\r?\n/)
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trimStart())
+      .join('\n');
+    if (!data) continue;
+    try {
+      events.push(JSON.parse(data));
+    } catch {
+      events.push({ type: 'malformed', raw: data });
+    }
+  }
+  return { events, rest };
+}
+
 export async function streamMedicalChat(message, history, onChunk, options = {}) {
   const response = await fetch(apiUrl('/api/chat/stream'), {
     method: 'POST',
@@ -86,34 +109,35 @@ export async function streamMedicalChat(message, history, onChunk, options = {})
   let metadata = null;
   let streamError = null;
 
+  const handleEvents = (events) => {
+    for (const payload of events) {
+      if (payload.type === 'chunk' && payload.text) {
+        fullText += payload.text;
+        onChunk?.(payload.text);
+      } else if (payload.type === 'done') {
+        metadata = payload;
+      } else if (payload.type === 'error') {
+        streamError = payload;
+      }
+    }
+  };
+
   while (true) {
     const { done, value } = await reader.read();
     buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
-    const events = buffer.split('\n\n');
-    buffer = events.pop() || '';
-
-    for (const rawEvent of events) {
-      const dataLine = rawEvent.split('\n').find((line) => line.startsWith('data:'));
-      if (!dataLine) continue;
-      try {
-        const payload = JSON.parse(dataLine.slice(5).trim());
-        if (payload.type === 'chunk' && payload.text) {
-          fullText += payload.text;
-          onChunk?.(payload.text);
-        } else if (payload.type === 'done') {
-          metadata = payload;
-        } else if (payload.type === 'error') {
-          streamError = payload.error || 'Medical chat stream failed';
-        }
-      } catch {
-        // Ignore malformed events; the gateway emits a final done/error event.
-      }
-    }
+    const parsed = parseGatewaySseBuffer(buffer, { final: done });
+    buffer = parsed.rest;
+    handleEvents(parsed.events);
     if (done) break;
   }
 
-  if (streamError && !fullText) throw new ApiError(streamError);
-  return { text: fullText, metadata, error: streamError };
+  if (streamError && !fullText) {
+    throw new ApiError(streamError.error || 'Medical chat stream failed', {
+      code: streamError.code || null,
+      payload: streamError
+    });
+  }
+  return { text: fullText, metadata, error: streamError?.error || null };
 }
 
 function fileToBase64(file) {
@@ -142,8 +166,8 @@ export const medicalApi = {
   health: gatewayHealth,
   publicStatus: () => apiRequest('/api/status'),
   knowledgeStatus: () => apiRequest('/api/knowledge/status'),
-  searchKnowledge: (query, limit = 8, locale = 'auto') => apiRequest(`/api/knowledge/search?q=${encodeURIComponent(query)}&limit=${limit}&locale=${locale}`),
-  terminology: (query, locale = 'auto') => apiRequest(`/api/knowledge/terminology?q=${encodeURIComponent(query)}&locale=${locale}`),
+  searchKnowledge: (query, limit = 8, locale = 'auto') => apiRequest(`/api/knowledge/search?q=${encodeURIComponent(query)}&limit=${limit}&locale=${encodeURIComponent(locale)}`),
+  terminology: (query, locale = 'auto') => apiRequest(`/api/knowledge/terminology?q=${encodeURIComponent(query)}&locale=${encodeURIComponent(locale)}`),
   streamChat: streamMedicalChat,
   getProfile: (token, options = {}) => apiRequest('/api/privacy/me', { token, ...options }),
   setConsent: (token, payload) => apiRequest('/api/privacy/consent', { method: 'POST', token, body: JSON.stringify(payload) }),
