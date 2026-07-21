@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { isAuthenticationError, medicalApi } from '../services/apiClient';
+import { loadSessionWorkspace } from '../services/sessionWorkspace';
 
 function splitList(value) {
   return String(value || '').split(',').map((item) => item.trim()).filter(Boolean);
@@ -59,16 +60,11 @@ export default function AssistantControlPanel({
   }
 
   async function loadSessionData(sessionToken, verifiedProfile = null) {
-    // Verify once before fan-out so an invalid token cannot generate three 401s.
-    const nextProfile = verifiedProfile || await medicalApi.getProfile(sessionToken);
-    const [uploadPayload, sharePayload] = await Promise.all([
-      medicalApi.listUploads(sessionToken),
-      medicalApi.listShares(sessionToken)
-    ]);
-    applyProfile(nextProfile);
-    setUploads(uploadPayload.uploads || []);
-    setShares(sharePayload.shares || []);
-    return nextProfile;
+    const workspace = await loadSessionWorkspace(medicalApi, sessionToken, { verifiedProfile });
+    applyProfile(workspace.profile);
+    setUploads(workspace.uploads);
+    setShares(workspace.shares);
+    return workspace.profile;
   }
 
   function handlePrivateError(error) {
@@ -233,7 +229,7 @@ export default function AssistantControlPanel({
         <section className="border rounded-lg p-3 mb-4">
           <h3 className="font-medium">Consent and structured context</h3>
           <p className="text-xs text-gray-500">Information remains user-provided and never silently becomes a diagnosis.</p>
-          <div className="text-xs my-2">Consent: {profile?.consent?.acceptedAt && !profile?.consent?.revokedAt ? 'active' : 'not active'}</div>
+          <div className="text-xs my-2">Consent: {profile?.consent?.acceptedAt && !profile?.consent.revokedAt ? 'active' : 'not active'}</div>
           <button className="px-3 py-2 border rounded mb-3" disabled={!authenticated} onClick={acceptConsent}>Record consent</button>
           {Object.entries(contextForm).map(([key, value]) => (
             <label className="block text-xs mb-2" key={key}>{key}
