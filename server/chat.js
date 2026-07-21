@@ -31,6 +31,31 @@ function evidenceText(knowledge = {}) {
   ].join('\n')).join('\n\n');
 }
 
+export function buildEvidencePrompt({ question = '', history = [], knowledge = {}, patientContext = null, attachments = [] } = {}) {
+  const evidence = (knowledge.results || []).slice(0, 8).map((item, index) => [
+    `[${index + 1}] ${item.title}`,
+    `Source: ${item.source}; jurisdiction: ${item.jurisdiction}; evidence tier: ${item.evidenceTier}; review: ${item.reviewStatus}; updated: ${item.updatedAt || item.publishedAt || item.retrievedAt || 'unknown'}`,
+    item.abstract || item.content || ''
+  ].join('\n')).join('\n\n');
+  const recent = (Array.isArray(history) ? history : []).slice(-10)
+    .map((item) => `${item.role === 'assistant' ? 'Assistant' : 'User'}: ${String(item.content || '')}`)
+    .join('\n');
+  const context = patientContext ? `\nUser-confirmed context (unverified):\n${JSON.stringify(patientContext, null, 2)}\n` : '';
+  const documents = attachmentText(attachments);
+  return `Use only the evidence below for evidence-grounded claims. If it is insufficient, state that clearly and do not invent citations.
+
+Knowledge freshness: ${knowledge?.freshness?.level || 'unknown'} (checked ${knowledge?.freshness?.checkedAt || 'unknown'})
+Preferred jurisdiction: ${knowledge?.localeRouting?.preferredJurisdiction || 'unspecified'}
+${context}${documents ? `\nUploaded documents:\n${documents}\n` : ''}
+Conversation:
+${recent || '(none)'}
+
+Question: ${question}
+
+Evidence:
+${evidence || 'No matching evidence.'}`;
+}
+
 function conflictText(conflicts = []) {
   if (!conflicts.length) return 'No material evidence conflicts detected by deterministic screening.';
   return conflicts.map((conflict, index) => {
