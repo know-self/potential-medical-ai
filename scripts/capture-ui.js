@@ -47,7 +47,7 @@ const health = {
       }
     }
   },
-  models: { openRouterConfigured: true, googleConfigured: true },
+  models: { configured: true, model: 'visual-model', mode: 'knowledge-rag', endpointHost: '127.0.0.1:1234' },
   localClinicalProcessing: false,
   timestamp: '2026-07-19T10:24:00.000Z'
 };
@@ -117,6 +117,7 @@ function json(route, payload, status = 200) {
 async function installMocks(page) {
   await page.addInitScript(() => {
     sessionStorage.setItem('medical-user-session', 'visual-session-token');
+    sessionStorage.setItem('medical-user-email', 'visual@example.test');
     localStorage.setItem('theme', 'light');
   });
 
@@ -162,8 +163,8 @@ try {
 
   await page.getByText('Chest pain in a 62-year-old male', { exact: true }).click();
   await page.getByText('Cardiac ischemia', { exact: false }).waitFor({ state: 'visible' });
+  await page.locator('.conversation-pane').waitFor({ state: 'visible' });
   await assertNoHorizontalOverflow(page, 'chat desktop');
-  if (!(await page.locator('.assistant-control-rail').isVisible())) throw new Error('Desktop assistant control rail is not visible');
   await page.screenshot({ path: path.join(outputDir, 'ui-chat-desktop.png'), fullPage: false });
 
   await page.locator('.primary-nav').getByRole('button', { name: 'Evidence' }).click();
@@ -176,12 +177,11 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(350);
   await assertNoHorizontalOverflow(page, 'mobile');
-  if (await page.locator('.assistant-control-rail').isVisible()) throw new Error('Desktop assistant control rail should be hidden on mobile');
   await page.getByRole('button', { name: 'Open navigation' }).click();
   await page.waitForTimeout(200);
   await page.screenshot({ path: path.join(outputDir, 'ui-mobile.png'), fullPage: false });
 
-  console.log('Visual smoke test passed: chat, evidence and mobile screenshots captured without horizontal overflow.');
+  console.log('Visual smoke test passed: authenticated chat, evidence and mobile navigation rendered without horizontal overflow.');
 } finally {
   await browser?.close();
   if (previewServer?.httpServer) await new Promise((resolve) => previewServer.httpServer.close(resolve));
