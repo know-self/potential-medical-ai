@@ -7,7 +7,7 @@ import ChatMessage from './components/ChatMessage';
 import ChatSidebar from './components/ChatSidebar';
 import EvidenceWorkspace from './components/EvidenceWorkspace';
 import WelcomeMessage from './components/WelcomeMessage';
-import { medicalApi } from './services/apiClient';
+import { isAuthenticationError, medicalApi } from './services/apiClient';
 import { ChatHistoryService } from './services/chatHistory';
 import { getTheme, initializeTheme, toggleTheme } from './utils/theme';
 
@@ -19,6 +19,7 @@ export default function App() {
   const [historyService, setHistoryService] = useState(null);
   const [platformStatus, setPlatformStatus] = useState(null);
   const [connectionError, setConnectionError] = useState('');
+  const [sessionNotice, setSessionNotice] = useState('');
   const [chats, setChats] = useState([]);
   const [currentChatId, setCurrentChatId] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -40,6 +41,12 @@ export default function App() {
     initializeTheme();
     setTheme(getTheme());
   }, []);
+
+  useEffect(() => {
+    if (!sessionNotice) return undefined;
+    const timer = setTimeout(() => setSessionNotice(''), 8000);
+    return () => clearTimeout(timer);
+  }, [sessionNotice]);
 
   useEffect(() => {
     const service = new ChatHistoryService();
@@ -67,14 +74,36 @@ export default function App() {
     };
   }, []);
 
+  const clearSession = useCallback((notice = '') => {
+    setSessionToken('');
+    sessionStorage.removeItem('medical-user-session');
+    setAttachmentIds([]);
+    setWorkspaceData(emptyWorkspaceData);
+    if (notice) setSessionNotice(notice);
+  }, []);
+
+  const changeToken = useCallback((value) => {
+    const next = String(value || '').trim();
+    setSessionToken(next);
+    if (next) sessionStorage.setItem('medical-user-session', next);
+    else {
+      sessionStorage.removeItem('medical-user-session');
+      setAttachmentIds([]);
+      setWorkspaceData(emptyWorkspaceData);
+    }
+    setSessionNotice('');
+  }, []);
+
   const refreshWorkspaceData = useCallback(async () => {
     if (!sessionToken) {
       setWorkspaceData(emptyWorkspaceData);
       return;
     }
     try {
-      const [profile, uploads, shares] = await Promise.all([
-        medicalApi.getProfile(sessionToken),
+      // Validate the committed token first. This prevents three concurrent 401s
+      // when a stale token is restored from sessionStorage.
+      const profile = await medicalApi.getProfile(sessionToken);
+      const [uploads, shares] = await Promise.all([
         medicalApi.listUploads(sessionToken),
         medicalApi.listShares(sessionToken)
       ]);
@@ -83,10 +112,14 @@ export default function App() {
         uploads: uploads.uploads || [],
         shares: shares.shares || []
       });
-    } catch {
+    } catch (error) {
+      if (isAuthenticationError(error)) {
+        clearSession('Secure session expired or became invalid. It was removed; public chat remains available.');
+        return;
+      }
       setWorkspaceData(emptyWorkspaceData);
     }
-  }, [sessionToken]);
+  }, [clearSession, sessionToken]);
 
   useEffect(() => {
     refreshWorkspaceData();
@@ -120,14 +153,32 @@ export default function App() {
       setIsLoading(true);
       const history = [...messages.map(({ role, content }) => ({ role, content })), user];
       let streamed = '';
-      const result = await medicalApi.streamChat(message, history, (chunk) => {
+      const onChunk = (chunk) => {
         streamed += chunk;
         setMessages((previous) => {
           const next = [...previous];
           next[next.length - 1] = { role: 'assistant', content: streamed, isTyping: false };
           return next;
         });
-      }, { token: sessionToken, attachmentIds, locale: 'auto' });
+      };
+
+      let result;
+      try {
+        result = await medicalApi.streamChat(message, history, onChunk, {
+          token: sessionToken,
+          attachmentIds,
+          locale: 'auto'
+        });
+      } catch (error) {
+        if (!sessionToken || !isAuthenticationError(error)) throw error;
+        clearSession('Secure session expired. This answer continued without patient context or private attachments.');
+        result = await medicalApi.streamChat(message, history, onChunk, {
+          token: '',
+          attachmentIds: [],
+          locale: 'auto'
+        });
+      }
+
       const finalText = result.text || streamed || 'No response was generated.';
       setMessages((previous) => {
         const next = [...previous];
@@ -192,11 +243,6 @@ export default function App() {
   const updateTitle = async (id, title) => {
     await historyService.updateChatTitle(id, title);
     loadChats();
-  };
-
-  const changeToken = (value) => {
-    setSessionToken(value);
-    value ? sessionStorage.setItem('medical-user-session', value) : sessionStorage.removeItem('medical-user-session');
   };
 
   const navigate = (view) => {
@@ -295,6 +341,7 @@ export default function App() {
         onSelectedAttachmentIdsChange={setAttachmentIds}
       />
 
+      {sessionNotice && <div className="toast-error session-warning"><strong>Secure session reset</strong><span>{sessionNotice}</span></div>}
       {connectionError && <div className="toast-error"><strong>Medical platform unavailable</strong><span>{connectionError}</span></div>}
     </div>
   );
