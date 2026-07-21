@@ -42,7 +42,6 @@ function endpointUrl(value) {
   if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Custom model endpoint must use http or https');
   if (url.username || url.password) throw new Error('Credentials must not be embedded in the endpoint URL');
   url.hash = '';
-  url.search = '';
   const pathname = url.pathname.replace(/\/+$/, '');
   if (!pathname || pathname === '/') url.pathname = '/v1/chat/completions';
   else if (pathname.endsWith('/v1')) url.pathname = `${pathname}/chat/completions`;
@@ -89,14 +88,17 @@ async function validateEndpointNetwork(url) {
   if (config.customModel.allowedHosts.length && !config.customModel.allowedHosts.includes(hostname)) {
     throw new Error(`Custom model host is not allowed: ${hostname}`);
   }
-  if (url.protocol === 'http:' && !isLoopback(hostname) && !config.customModel.allowPrivateNetwork) {
-    throw new Error('Remote custom model endpoints must use HTTPS; HTTP is allowed only for loopback models');
-  }
   if (isLoopback(hostname)) return;
+
   const addresses = await dns.lookup(hostname, { all: true, verbatim: true });
   if (!addresses.length) throw new Error('Custom model endpoint hostname did not resolve');
-  if (!config.customModel.allowPrivateNetwork && addresses.some((item) => isPrivateAddress(item.address))) {
+  const privateAddresses = addresses.filter((item) => isPrivateAddress(item.address));
+
+  if (privateAddresses.length && !config.customModel.allowPrivateNetwork) {
     throw new Error('Custom model endpoint resolves to a private or reserved network');
+  }
+  if (url.protocol === 'http:' && (!config.customModel.allowPrivateNetwork || privateAddresses.length !== addresses.length)) {
+    throw new Error('Public custom model endpoints must use HTTPS; HTTP is allowed only for loopback or explicitly trusted private-network models');
   }
 }
 
@@ -131,34 +133,38 @@ async function parseStreamingResponse(response, onChunk) {
   const decoder = new TextDecoder();
   let buffer = '';
   let fullText = '';
+
+  const processLine = (rawLine) => {
+    const line = rawLine.trim();
+    if (!line.startsWith('data:')) return;
+    const data = line.slice(5).trim();
+    if (!data || data === '[DONE]') return;
+    try {
+      const parsed = JSON.parse(data);
+      const chunk = extractContent(parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.message?.content);
+      if (chunk) {
+        fullText += chunk;
+        onChunk?.(chunk);
+      }
+    } catch {
+      // Ignore malformed provider events while preserving valid streamed chunks.
+    }
+  };
+
   while (true) {
     const { done, value } = await reader.read();
     buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
     const lines = buffer.split(/\r?\n/);
     buffer = lines.pop() || '';
-    for (const rawLine of lines) {
-      const line = rawLine.trim();
-      if (!line.startsWith('data:')) continue;
-      const data = line.slice(5).trim();
-      if (!data || data === '[DONE]') continue;
-      try {
-        const parsed = JSON.parse(data);
-        const chunk = extractContent(parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.message?.content);
-        if (chunk) {
-          fullText += chunk;
-          onChunk?.(chunk);
-        }
-      } catch {
-        // Ignore malformed provider events while preserving valid streamed chunks.
-      }
-    }
+    for (const line of lines) processLine(line);
     if (done) break;
   }
+  if (buffer.trim()) processLine(buffer);
   return fullText;
 }
 
 export async function streamCustomModelChunks({ settings, messages, temperature, maxTokens }, onChunk) {
-  const normalized = settings?.endpointHost ? settings : normalizeModelSettings(settings);
+  const normalized = normalizeModelSettings(settings);
   const url = new URL(normalized.endpoint);
   await validateEndpointNetwork(url);
   const response = await fetchWithTimeout(url, {
