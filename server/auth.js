@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 
+const inspectSymbol = Symbol.for('nodejs.util.inspect.custom');
+
 function encode(value) {
   return Buffer.from(JSON.stringify(value)).toString('base64url');
 }
@@ -12,6 +14,30 @@ function signature(input, secret) {
   return crypto.createHmac('sha256', secret).update(input).digest('base64url');
 }
 
+export class AuthenticationError extends Error {
+  constructor(message, { code = 'AUTH_TOKEN_INVALID', statusCode = 401 } = {}) {
+    super(message);
+    this.name = 'AuthenticationError';
+    this.code = code;
+    this.statusCode = statusCode;
+    // These are expected client failures, not server crashes. Keep accidental
+    // console logging compact while preserving structured status/code fields.
+    this.stack = undefined;
+  }
+
+  [inspectSymbol]() {
+    return `${this.name} [${this.code}]: ${this.message}`;
+  }
+}
+
+function authError(message, code, statusCode = 401) {
+  return new AuthenticationError(message, { code, statusCode });
+}
+
+export function isAuthenticationError(error) {
+  return error instanceof AuthenticationError || [401, 403].includes(error?.statusCode) || /^AUTH_/.test(String(error?.code || ''));
+}
+
 export function issueSignedToken(payload, secret, { expiresInSeconds = 3600 } = {}) {
   if (!secret || String(secret).length < 24) throw new Error('Signing secret must contain at least 24 characters');
   const now = Math.floor(Date.now() / 1000);
@@ -22,20 +48,33 @@ export function issueSignedToken(payload, secret, { expiresInSeconds = 3600 } = 
 }
 
 export function verifySignedToken(token, secret, { requiredScopes = [], kind } = {}) {
-  if (!secret || !token) throw new Error('Authentication token is required');
+  if (!secret) throw authError('Authentication service is not configured', 'AUTH_NOT_CONFIGURED', 503);
+  if (!token) throw authError('Authentication token is required', 'AUTH_TOKEN_REQUIRED');
+
   const parts = String(token).split('.');
-  if (parts.length !== 3) throw new Error('Invalid authentication token');
+  if (parts.length !== 3) throw authError('Invalid authentication token', 'AUTH_TOKEN_INVALID');
+
   const unsigned = `${parts[0]}.${parts[1]}`;
   const expected = Buffer.from(signature(unsigned, secret));
   const actual = Buffer.from(parts[2]);
-  if (expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) throw new Error('Invalid authentication token');
-  const payload = decode(parts[1]);
+  if (expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) {
+    throw authError('Invalid authentication token', 'AUTH_TOKEN_INVALID');
+  }
+
+  let payload;
+  try {
+    payload = decode(parts[1]);
+  } catch {
+    throw authError('Invalid authentication token', 'AUTH_TOKEN_INVALID');
+  }
+
   const now = Math.floor(Date.now() / 1000);
-  if (!payload.exp || payload.exp <= now) throw new Error('Authentication token expired');
-  if (kind && payload.kind !== kind) throw new Error('Authentication token has the wrong kind');
+  if (!payload.exp || payload.exp <= now) throw authError('Authentication token expired', 'AUTH_TOKEN_EXPIRED');
+  if (kind && payload.kind !== kind) throw authError('Authentication token has the wrong kind', 'AUTH_TOKEN_WRONG_KIND');
+
   const scopes = new Set(Array.isArray(payload.scopes) ? payload.scopes : []);
   for (const scope of requiredScopes) {
-    if (!scopes.has(scope)) throw new Error(`Missing required scope: ${scope}`);
+    if (!scopes.has(scope)) throw authError(`Missing required scope: ${scope}`, 'AUTH_SCOPE_MISSING', 403);
   }
   return payload;
 }

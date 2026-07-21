@@ -1,8 +1,8 @@
 {
   "name": "potential-medical-ai",
-  "version": "3.2.1",
+  "version": "3.3.0",
   "type": "module",
-  "description": "Conversational medical assistant with governed realtime evidence, privacy controls, secure collaboration, multimodal ingestion, and MCP access",
+  "description": "Conversational medical assistant with custom OpenAI-compatible models, optional document and knowledge RAG, privacy controls, secure collaboration, and MCP access",
   "main": "server/server.js",
   "bin": {
     "pmai": "bin/pmai.js"
@@ -30,6 +30,7 @@
     "preview": "vite preview",
     "test": "node --test && npm run eval:medical && npm run eval:translation && npm run verify:browser-boundary",
     "check": "npm test && npm run build",
+    "release:check": "npm run check && npm run security-check",
     "visual:test": "node scripts/capture-ui.js",
     "security-check": "node scripts/check-security.js",
     "eval:medical": "node scripts/run-medical-evals.js",
@@ -62,10 +63,10 @@
   "keywords": [
     "medical-ai",
     "healthcare",
+    "openai-compatible",
+    "rag",
     "mcp",
     "knowledge-control-plane",
-    "pubmed",
-    "clinical-guidelines",
     "react"
   ],
   "author": "David Bisky",

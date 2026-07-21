@@ -7,11 +7,11 @@ import ChatMessage from './components/ChatMessage';
 import ChatSidebar from './components/ChatSidebar';
 import EvidenceWorkspace from './components/EvidenceWorkspace';
 import WelcomeMessage from './components/WelcomeMessage';
-import { medicalApi } from './services/apiClient';
+import { isAuthenticationError, medicalApi } from './services/apiClient';
 import { ChatHistoryService } from './services/chatHistory';
+import { clearModelSettings, loadModelSettings, modelSettingsReady, saveModelSettings } from './services/modelSettings';
+import { emptySessionWorkspace, loadSessionWorkspace } from './services/sessionWorkspace';
 import { getTheme, initializeTheme, toggleTheme } from './utils/theme';
-
-const emptyWorkspaceData = { profile: null, uploads: [], shares: [] };
 
 export default function App() {
   const [messages, setMessages] = useState([]);
@@ -19,18 +19,23 @@ export default function App() {
   const [historyService, setHistoryService] = useState(null);
   const [platformStatus, setPlatformStatus] = useState(null);
   const [connectionError, setConnectionError] = useState('');
+  const [sessionNotice, setSessionNotice] = useState('');
   const [chats, setChats] = useState([]);
   const [currentChatId, setCurrentChatId] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [theme, setTheme] = useState('light');
-  const [ready, setReady] = useState(false);
+  const [gatewayReady, setGatewayReady] = useState(false);
   const [example, setExample] = useState(null);
   const [controlsOpen, setControlsOpen] = useState(false);
   const [activeView, setActiveView] = useState('chat');
   const [sessionToken, setSessionToken] = useState(() => sessionStorage.getItem('medical-user-session') || '');
+  const [modelSettings, setModelSettings] = useState(() => loadModelSettings());
   const [attachmentIds, setAttachmentIds] = useState([]);
-  const [workspaceData, setWorkspaceData] = useState(emptyWorkspaceData);
+  const [workspaceData, setWorkspaceData] = useState(emptySessionWorkspace);
   const endRef = useRef(null);
+
+  const modelReady = modelSettingsReady(modelSettings);
+  const ready = gatewayReady && modelReady;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -42,6 +47,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!sessionNotice) return undefined;
+    const timer = setTimeout(() => setSessionNotice(''), 8000);
+    return () => clearTimeout(timer);
+  }, [sessionNotice]);
+
+  useEffect(() => {
     const service = new ChatHistoryService();
     setHistoryService(service);
     let live = true;
@@ -50,12 +61,12 @@ export default function App() {
         const status = await medicalApi.health();
         if (!live) return;
         setPlatformStatus(status);
-        setReady(status.status === 'ok');
-        setConnectionError(status.status === 'ok' ? '' : 'Knowledge plane is stale or unavailable.');
+        setGatewayReady(status.status === 'ok');
+        setConnectionError(status.status === 'ok' ? '' : 'Local safety gateway is unavailable.');
       } catch {
         if (live) {
-          setConnectionError('Không thể kết nối chat gateway hoặc knowledge plane.');
-          setReady(false);
+          setConnectionError('Không thể kết nối local safety gateway.');
+          setGatewayReady(false);
         }
       }
     };
@@ -67,26 +78,50 @@ export default function App() {
     };
   }, []);
 
+  const clearSession = useCallback((notice = '') => {
+    setSessionToken('');
+    sessionStorage.removeItem('medical-user-session');
+    setAttachmentIds([]);
+    setWorkspaceData(emptySessionWorkspace);
+    if (notice) setSessionNotice(notice);
+  }, []);
+
+  const changeToken = useCallback((value) => {
+    const next = String(value || '').trim();
+    setSessionToken(next);
+    if (next) sessionStorage.setItem('medical-user-session', next);
+    else {
+      sessionStorage.removeItem('medical-user-session');
+      setAttachmentIds([]);
+      setWorkspaceData(emptySessionWorkspace);
+    }
+    setSessionNotice('');
+  }, []);
+
+  const changeModelSettings = useCallback((value) => {
+    const next = value ? saveModelSettings(value) : clearModelSettings();
+    setModelSettings(next);
+    setConnectionError('');
+    setSessionNotice(value
+      ? `Custom model saved for this tab: ${next.model} · ${next.mode}.`
+      : 'Custom model settings were cleared from this tab.');
+  }, []);
+
   const refreshWorkspaceData = useCallback(async () => {
     if (!sessionToken) {
-      setWorkspaceData(emptyWorkspaceData);
+      setWorkspaceData(emptySessionWorkspace);
       return;
     }
     try {
-      const [profile, uploads, shares] = await Promise.all([
-        medicalApi.getProfile(sessionToken),
-        medicalApi.listUploads(sessionToken),
-        medicalApi.listShares(sessionToken)
-      ]);
-      setWorkspaceData({
-        profile,
-        uploads: uploads.uploads || [],
-        shares: shares.shares || []
-      });
-    } catch {
-      setWorkspaceData(emptyWorkspaceData);
+      setWorkspaceData(await loadSessionWorkspace(medicalApi, sessionToken));
+    } catch (error) {
+      if (isAuthenticationError(error)) {
+        clearSession('Secure session expired or became invalid. It was removed; public chat remains available.');
+        return;
+      }
+      setWorkspaceData(emptySessionWorkspace);
     }
-  }, [sessionToken]);
+  }, [clearSession, sessionToken]);
 
   useEffect(() => {
     refreshWorkspaceData();
@@ -109,7 +144,13 @@ export default function App() {
   };
 
   const send = async (message) => {
-    if (!historyService || !ready || isLoading) return;
+    if (!historyService || !ready || isLoading) {
+      if (!modelReady) {
+        setControlsOpen(true);
+        setSessionNotice('Configure an OpenAI-compatible endpoint and model before chatting.');
+      }
+      return;
+    }
     let chatId;
     setExample(null);
     try {
@@ -120,14 +161,34 @@ export default function App() {
       setIsLoading(true);
       const history = [...messages.map(({ role, content }) => ({ role, content })), user];
       let streamed = '';
-      const result = await medicalApi.streamChat(message, history, (chunk) => {
+      const onChunk = (chunk) => {
         streamed += chunk;
         setMessages((previous) => {
           const next = [...previous];
           next[next.length - 1] = { role: 'assistant', content: streamed, isTyping: false };
           return next;
         });
-      }, { token: sessionToken, attachmentIds, locale: 'auto' });
+      };
+
+      let result;
+      try {
+        result = await medicalApi.streamChat(message, history, onChunk, {
+          token: sessionToken,
+          attachmentIds,
+          locale: 'auto',
+          model: modelSettings
+        });
+      } catch (error) {
+        if (!sessionToken || !isAuthenticationError(error)) throw error;
+        clearSession('Secure session expired. This answer continued without patient context or private attachments.');
+        result = await medicalApi.streamChat(message, history, onChunk, {
+          token: '',
+          attachmentIds: [],
+          locale: 'auto',
+          model: { ...modelSettings, includePatientContext: false }
+        });
+      }
+
       const finalText = result.text || streamed || 'No response was generated.';
       setMessages((previous) => {
         const next = [...previous];
@@ -144,7 +205,7 @@ export default function App() {
       }
       setConnectionError(result.error || '');
     } catch (error) {
-      const text = 'Chat gateway hoặc knowledge plane đang không khả dụng. Hệ thống không dùng kiến thức cục bộ để trả lời thay thế.';
+      const text = `Custom model is unavailable: ${error.message}`;
       setMessages((previous) => {
         const next = [...previous];
         if (next.at(-1)?.role === 'assistant') next[next.length - 1] = { role: 'assistant', content: text };
@@ -194,11 +255,6 @@ export default function App() {
     loadChats();
   };
 
-  const changeToken = (value) => {
-    setSessionToken(value);
-    value ? sessionStorage.setItem('medical-user-session', value) : sessionStorage.removeItem('medical-user-session');
-  };
-
   const navigate = (view) => {
     if (view === 'chat' || view === 'evidence') {
       setActiveView(view);
@@ -217,6 +273,7 @@ export default function App() {
   const freshness = platformStatus?.knowledge?.freshness;
   const selectedUploads = workspaceData.uploads.filter((item) => attachmentIds.includes(item.id));
   const evidenceUploads = selectedUploads.length ? selectedUploads : workspaceData.uploads;
+  const modeLabel = modelSettings.mode === 'knowledge-rag' ? 'Knowledge RAG' : modelSettings.mode === 'document-rag' ? 'Document RAG' : 'Direct Model';
 
   return (
     <div className="medical-app">
@@ -226,7 +283,7 @@ export default function App() {
         onToggleSidebar={() => setSidebarOpen((value) => !value)}
         theme={theme}
         onToggleTheme={() => setTheme(toggleTheme())}
-        freshness={freshness}
+        freshness={modelSettings.mode === 'knowledge-rag' ? freshness : null}
         onOpenControls={() => setControlsOpen(true)}
       />
 
@@ -260,7 +317,7 @@ export default function App() {
               isLoading={isLoading}
               disabled={!ready}
               exampleMessage={example}
-              placeholder={ready ? 'Ask a clinical question…' : 'Waiting for verified knowledge freshness…'}
+              placeholder={!modelReady ? 'Configure a custom model in Assistant controls…' : gatewayReady ? `Ask using ${modeLabel}…` : 'Waiting for local safety gateway…'}
               onOpenControls={() => setControlsOpen(true)}
             />
           </main>
@@ -269,7 +326,7 @@ export default function App() {
             uploads={workspaceData.uploads}
             shares={workspaceData.shares}
             selectedAttachmentIds={attachmentIds}
-            freshness={freshness}
+            freshness={modelSettings.mode === 'knowledge-rag' ? freshness : null}
             onManage={() => setControlsOpen(true)}
           />
         </> : <EvidenceWorkspace
@@ -283,19 +340,22 @@ export default function App() {
         />}
       </div>
 
-      <footer className="app-footer"><span>100% server-side clinical processing</span><i/><span>No local clinical fallback</span><i/><span>Versioned evidence and citations</span></footer>
+      <footer className="app-footer"><span>{modeLabel}</span><i/><span>Custom OpenAI-compatible endpoint</span><i/><span>Safety gateway · no stored provider key</span></footer>
 
       <AssistantControlPanel
         open={controlsOpen}
         onClose={closeControls}
         token={sessionToken}
         onTokenChange={changeToken}
+        modelSettings={modelSettings}
+        onModelSettingsChange={changeModelSettings}
         messages={messages}
         selectedAttachmentIds={attachmentIds}
         onSelectedAttachmentIdsChange={setAttachmentIds}
       />
 
-      {connectionError && <div className="toast-error"><strong>Medical platform unavailable</strong><span>{connectionError}</span></div>}
+      {sessionNotice && <div className="toast-error session-warning"><strong>Assistant settings</strong><span>{sessionNotice}</span></div>}
+      {connectionError && <div className="toast-error"><strong>Model or gateway unavailable</strong><span>{connectionError}</span></div>}
     </div>
   );
 }
