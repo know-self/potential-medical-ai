@@ -52,6 +52,18 @@ export async function apiRequest(path, options = {}) {
   return response.status === 204 ? null : response.json();
 }
 
+async function gatewayHealth() {
+  const response = await fetch(apiUrl('/api/health'));
+  const payload = await response.json().catch(() => ({}));
+  return {
+    ...payload,
+    gatewayReachable: true,
+    gatewayHttpStatus: response.status,
+    knowledgeStatus: payload.status || (response.ok ? 'ok' : 'degraded'),
+    status: 'ok'
+  };
+}
+
 export async function streamMedicalChat(message, history, onChunk, options = {}) {
   const response = await fetch(apiUrl('/api/chat/stream'), {
     method: 'POST',
@@ -61,7 +73,8 @@ export async function streamMedicalChat(message, history, onChunk, options = {})
       message,
       history,
       locale: options.locale || 'auto',
-      attachmentIds: options.attachmentIds || []
+      attachmentIds: options.attachmentIds || [],
+      model: options.model || {}
     })
   });
   if (!response.ok || !response.body) throw await parseError(response);
@@ -126,7 +139,7 @@ async function downloadExport(token, format = 'fhir') {
 }
 
 export const medicalApi = {
-  health: () => apiRequest('/api/health'),
+  health: gatewayHealth,
   publicStatus: () => apiRequest('/api/status'),
   knowledgeStatus: () => apiRequest('/api/knowledge/status'),
   searchKnowledge: (query, limit = 8, locale = 'auto') => apiRequest(`/api/knowledge/search?q=${encodeURIComponent(query)}&limit=${limit}&locale=${locale}`),

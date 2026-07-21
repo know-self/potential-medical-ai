@@ -1,4 +1,4 @@
-const service = process.argv[2];
+const service = process.argv[2] || process.env.PMAI_BOOTSTRAP_SERVICE;
 
 async function startService(name) {
   if (name === 'knowledge') {

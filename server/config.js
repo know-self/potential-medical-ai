@@ -135,17 +135,16 @@ export const config = {
     circuitFailureThreshold: numberFromEnv('MODEL_CIRCUIT_FAILURE_THRESHOLD', 3),
     circuitResetSeconds: numberFromEnv('MODEL_CIRCUIT_RESET_SECONDS', 60)
   },
+  customModel: {
+    allowedHosts: listFromEnv('CUSTOM_MODEL_ALLOWED_HOSTS'),
+    allowPrivateNetwork: booleanFromEnv('CUSTOM_MODEL_ALLOW_PRIVATE_NETWORK', false),
+    maxMessageCharacters: numberFromEnv('CUSTOM_MODEL_MAX_MESSAGE_CHARACTERS', 40000),
+    maxOutputTokens: numberFromEnv('CUSTOM_MODEL_MAX_OUTPUT_TOKENS', 32768)
+  },
+  // Transitional empty values keep older health consumers readable. No provider credentials are loaded or used.
+  openRouter: { apiKey: '' },
+  google: { apiKey: '' },
 
-  openRouter: {
-    apiKey: process.env.OPENROUTER_API_KEY || '',
-    model: process.env.OPENROUTER_MODEL || 'google/gemma-3-12b-it:free',
-    appUrl: process.env.APP_PUBLIC_URL || 'http://localhost:3000',
-    appName: process.env.APP_NAME || 'Potential Medical AI'
-  },
-  google: {
-    apiKey: process.env.GOOGLE_AI_API_KEY || '',
-    model: process.env.GOOGLE_AI_MODEL || 'gemini-2.5-flash-lite'
-  },
   pubmed: {
     apiKey: process.env.NCBI_API_KEY || '',
     email: process.env.NCBI_EMAIL || '',
