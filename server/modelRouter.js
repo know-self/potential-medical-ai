@@ -31,7 +31,7 @@ export function providerOrder(task, modelSettings = {}) {
   }
 }
 
-export async function generateRoutedResponse({ messages, prompt, question, knowledge = {}, attachments = [], modelSettings, onChunk }) {
+export async function generateRoutedResponse({ messages, prompt, question, knowledge = {}, attachments = [], modelSettings, cacheable = true, onChunk }) {
   const task = classifyModelTask({ question, knowledge, attachments });
   const normalized = normalizeModelSettings(modelSettings);
   const provider = `custom:${normalized.endpointHost}`;
@@ -42,7 +42,7 @@ export async function generateRoutedResponse({ messages, prompt, question, knowl
     knowledgeUpdatedAt: knowledge.knowledgeUpdatedAt || '',
     task: `${task.type}:${normalized.endpointHost}:${normalized.model}:${normalized.mode}`
   });
-  const cached = getCachedResponse(key);
+  const cached = cacheable ? getCachedResponse(key) : null;
   if (cached) {
     onChunk?.(cached.text);
     return { ...cached, cached: true, task };
@@ -64,7 +64,7 @@ export async function generateRoutedResponse({ messages, prompt, question, knowl
       cached: false,
       task
     };
-    setCachedResponse(key, output);
+    if (cacheable) setCachedResponse(key, output);
     return output;
   } catch (error) {
     recordProviderFailure(provider);
