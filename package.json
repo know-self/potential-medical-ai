@@ -30,6 +30,7 @@
     "preview": "vite preview",
     "test": "node --test && npm run eval:medical && npm run eval:translation && npm run verify:browser-boundary",
     "check": "npm test && npm run build",
+    "release:check": "npm run check && npm run security-check",
     "visual:test": "node scripts/capture-ui.js",
     "security-check": "node scripts/check-security.js",
     "eval:medical": "node scripts/run-medical-evals.js",
