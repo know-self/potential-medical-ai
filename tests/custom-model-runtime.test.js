@@ -4,22 +4,7 @@ import http from 'node:http';
 import test from 'node:test';
 import { once } from 'node:events';
 import { normalizeModelSettings as normalizeServerSettings, streamCustomModelChunks } from '../server/models.js';
-import {
-  clearModelSettings,
-  loadModelSettings,
-  modelSettingsReady,
-  saveModelSettings
-} from '../src/services/modelSettings.js';
 import { supportedMimeType } from '../src/services/apiClient.js';
-
-function memoryStorage() {
-  const values = new Map();
-  return {
-    getItem: (key) => values.has(key) ? values.get(key) : null,
-    setItem: (key, value) => values.set(key, String(value)),
-    removeItem: (key) => values.delete(key)
-  };
-}
 
 test('server normalizes generic OpenAI-compatible model settings', () => {
   const settings = normalizeServerSettings({
@@ -41,22 +26,6 @@ test('server normalizes generic OpenAI-compatible model settings', () => {
   assert.equal(settings.temperature, 2);
   assert.equal(settings.maxTokens, 32768);
   assert.deepEqual(settings.headers, { 'x-api-version': '2026-01' });
-});
-
-test('browser model settings stay scoped to supplied session storage', () => {
-  const storage = memoryStorage();
-  assert.equal(modelSettingsReady(loadModelSettings(storage)), false);
-  const saved = saveModelSettings({
-    endpoint: 'http://127.0.0.1:1234/v1',
-    model: 'local-model',
-    apiKey: 'tab-only-key',
-    mode: 'direct'
-  }, storage);
-  assert.equal(modelSettingsReady(saved), true);
-  assert.equal(Object.hasOwn(saved, 'mode'), false);
-  assert.equal(loadModelSettings(storage).apiKey, 'tab-only-key');
-  assert.equal(clearModelSettings(storage).endpoint, '');
-  assert.equal(modelSettingsReady(loadModelSettings(storage)), false);
 });
 
 test('browser upload MIME inference supports approved extensions with generic types', () => {

@@ -1,16 +1,19 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import AssistantControlPanel from './components/AssistantControlPanel';
+import AuthPage from './components/AuthPage';
 import ChatHeader from './components/ChatHeader';
 import ChatInput from './components/ChatInput';
 import ChatMessage from './components/ChatMessage';
 import ChatSidebar from './components/ChatSidebar';
 import EvidenceWorkspace from './components/EvidenceWorkspace';
+import ToolWorkspace from './components/ToolWorkspace';
 import WelcomeMessage from './components/WelcomeMessage';
 import { isAuthenticationError, medicalApi } from './services/apiClient';
 import { ChatHistoryService } from './services/chatHistory';
-import { clearModelSettings, loadModelSettings, modelSettingsReady, saveModelSettings } from './services/modelSettings';
 import { emptySessionWorkspace, loadSessionWorkspace } from './services/sessionWorkspace';
 import { getTheme, initializeTheme, toggleTheme } from './utils/theme';
+
+const SESSION_TOKEN_KEY = 'medical-user-session';
+const SESSION_EMAIL_KEY = 'medical-user-email';
 
 export default function App() {
   const [messages, setMessages] = useState([]);
@@ -25,27 +28,18 @@ export default function App() {
   const [theme, setTheme] = useState('light');
   const [gatewayReady, setGatewayReady] = useState(false);
   const [example, setExample] = useState(null);
-  const [controlsOpen, setControlsOpen] = useState(false);
   const [activeView, setActiveView] = useState('chat');
-  const [sessionToken, setSessionToken] = useState(() => sessionStorage.getItem('medical-user-session') || '');
-  const [modelSettings, setModelSettings] = useState(() => loadModelSettings());
+  const [sessionToken, setSessionToken] = useState(() => sessionStorage.getItem(SESSION_TOKEN_KEY) || '');
+  const [accountEmail, setAccountEmail] = useState(() => sessionStorage.getItem(SESSION_EMAIL_KEY) || '');
   const [attachmentIds, setAttachmentIds] = useState([]);
   const [attachmentItems, setAttachmentItems] = useState([]);
   const [workspaceData, setWorkspaceData] = useState(emptySessionWorkspace);
   const endRef = useRef(null);
-
-  const modelReady = modelSettingsReady(modelSettings);
+  const modelReady = platformStatus?.models?.configured === true;
   const ready = gatewayReady && modelReady;
 
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages]);
-
-  useEffect(() => {
-    initializeTheme();
-    setTheme(getTheme());
-  }, []);
-
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages]);
+  useEffect(() => { initializeTheme(); setTheme(getTheme()); }, []);
   useEffect(() => {
     if (!sessionNotice) return undefined;
     const timer = setTimeout(() => setSessionNotice(''), 8000);
@@ -64,348 +58,145 @@ export default function App() {
         setGatewayReady(status.status === 'ok');
         setConnectionError(status.status === 'ok' ? '' : 'Local safety gateway is unavailable.');
       } catch {
-        if (live) {
-          setConnectionError('Không thể kết nối local safety gateway.');
-          setGatewayReady(false);
-        }
+        if (live) { setConnectionError('Cannot connect to the local safety gateway.'); setGatewayReady(false); }
       }
     };
     health();
     const timer = setInterval(health, 15000);
-    return () => {
-      live = false;
-      clearInterval(timer);
-    };
+    return () => { live = false; clearInterval(timer); };
   }, []);
 
   const clearSession = useCallback((notice = '') => {
-    setSessionToken('');
-    sessionStorage.removeItem('medical-user-session');
-    setAttachmentIds([]);
-    setAttachmentItems([]);
-    setWorkspaceData(emptySessionWorkspace);
+    setSessionToken(''); setAccountEmail('');
+    sessionStorage.removeItem(SESSION_TOKEN_KEY); sessionStorage.removeItem(SESSION_EMAIL_KEY);
+    setAttachmentIds([]); setAttachmentItems([]); setWorkspaceData(emptySessionWorkspace);
     if (notice) setSessionNotice(notice);
   }, []);
 
-  const changeToken = useCallback((value) => {
-    const next = String(value || '').trim();
-    setSessionToken(next);
-    if (next) sessionStorage.setItem('medical-user-session', next);
-    else {
-      sessionStorage.removeItem('medical-user-session');
-      setAttachmentIds([]);
-      setAttachmentItems([]);
-      setWorkspaceData(emptySessionWorkspace);
-    }
-    setSessionNotice('');
-  }, []);
-
-  const changeModelSettings = useCallback((value) => {
-    const next = value ? saveModelSettings(value) : clearModelSettings();
-    setModelSettings(next);
-    setConnectionError('');
-    setSessionNotice(value
-      ? `Custom model saved for this tab: ${next.model}.`
-      : 'Custom model settings were cleared from this tab.');
+  const authenticate = useCallback(({ token, user }) => {
+    const email = String(user?.email || '').trim();
+    setSessionToken(token); setAccountEmail(email);
+    sessionStorage.setItem(SESSION_TOKEN_KEY, token);
+    if (email) sessionStorage.setItem(SESSION_EMAIL_KEY, email);
   }, []);
 
   const refreshWorkspaceData = useCallback(async () => {
-    if (!sessionToken) {
-      setWorkspaceData(emptySessionWorkspace);
-      return;
-    }
-    try {
-      setWorkspaceData(await loadSessionWorkspace(medicalApi, sessionToken));
-    } catch (error) {
-      if (isAuthenticationError(error)) {
-        clearSession('Secure session expired or became invalid. It was removed; public chat remains available.');
-        return;
-      }
+    if (!sessionToken) { setWorkspaceData(emptySessionWorkspace); return; }
+    try { setWorkspaceData(await loadSessionWorkspace(medicalApi, sessionToken)); }
+    catch (error) {
+      if (isAuthenticationError(error)) { clearSession('Your secure session expired. Sign in again to continue.'); return; }
       setWorkspaceData(emptySessionWorkspace);
     }
   }, [clearSession, sessionToken]);
+  useEffect(() => { refreshWorkspaceData(); }, [refreshWorkspaceData]);
 
-  useEffect(() => {
-    refreshWorkspaceData();
-  }, [refreshWorkspaceData]);
-
-  const loadChats = async () => {
-    if (historyService) setChats(await historyService.getAllChats());
-  };
-
-  useEffect(() => {
-    loadChats();
-  }, [historyService]);
+  const loadChats = async () => { if (historyService) setChats(await historyService.getAllChats()); };
+  useEffect(() => { loadChats(); }, [historyService]);
 
   const ensureChat = async () => {
     if (currentChatId) return currentChatId;
     const chat = await historyService.createChat();
-    setChats((previous) => [chat, ...previous]);
-    setCurrentChatId(chat.id);
+    setChats((previous) => [chat, ...previous]); setCurrentChatId(chat.id);
     return chat.id;
   };
 
   const send = async (message) => {
-    if (!historyService || !ready || isLoading) {
-      if (!modelReady) {
-        setControlsOpen(true);
-        setSessionNotice('Configure an OpenAI-compatible endpoint and model before chatting.');
-      }
-      return;
-    }
-    let chatId;
+    if (!historyService || !ready || isLoading) return;
     setExample(null);
     try {
-      chatId = await ensureChat();
+      const chatId = await ensureChat();
       const user = { role: 'user', content: message };
       await historyService.addMessage(chatId, user);
       setMessages((previous) => [...previous, user, { role: 'assistant', content: '', isTyping: true }]);
       setIsLoading(true);
       const history = [...messages.map(({ role, content }) => ({ role, content })), user];
       let streamed = '';
-      const onChunk = (chunk) => {
+      const result = await medicalApi.streamChat(message, history, (chunk) => {
         streamed += chunk;
         setMessages((previous) => {
-          const next = [...previous];
-          next[next.length - 1] = { role: 'assistant', content: streamed, isTyping: false };
-          return next;
+          const next = [...previous]; next[next.length - 1] = { role: 'assistant', content: streamed, isTyping: false }; return next;
         });
-      };
-
-      let result;
-      try {
-        result = await medicalApi.streamChat(message, history, onChunk, {
-          token: sessionToken,
-          attachmentIds,
-          locale: 'auto',
-          model: modelSettings
-        });
-      } catch (error) {
-        if (!sessionToken || !isAuthenticationError(error)) throw error;
-        clearSession('Secure session expired. This answer continued without patient context or private attachments.');
-        result = await medicalApi.streamChat(message, history, onChunk, {
-          token: '',
-          attachmentIds: [],
-          locale: 'auto',
-          model: { ...modelSettings, includePatientContext: false }
-        });
-      }
-
+      }, { token: sessionToken, attachmentIds, locale: 'auto' });
       const finalText = result.text || streamed || 'No response was generated.';
-      setMessages((previous) => {
-        const next = [...previous];
-        next[next.length - 1] = { role: 'assistant', content: finalText };
-        return next;
-      });
+      setMessages((previous) => { const next = [...previous]; next[next.length - 1] = { role: 'assistant', content: finalText }; return next; });
       await historyService.addMessage(chatId, { role: 'assistant', content: finalText });
       await loadChats();
-      if (result.metadata?.freshness) {
-        setPlatformStatus((previous) => ({
-          ...previous,
-          knowledge: { ...(previous?.knowledge || {}), freshness: result.metadata.freshness }
-        }));
-      }
+      if (result.metadata?.freshness) setPlatformStatus((previous) => ({ ...previous, knowledge: { ...(previous?.knowledge || {}), freshness: result.metadata.freshness } }));
       setConnectionError(result.error || '');
     } catch (error) {
-      const text = `Custom model is unavailable: ${error.message}`;
-      setMessages((previous) => {
-        const next = [...previous];
-        if (next.at(-1)?.role === 'assistant') next[next.length - 1] = { role: 'assistant', content: text };
-        else next.push({ role: 'assistant', content: text });
-        return next;
-      });
+      if (isAuthenticationError(error)) clearSession('Your secure session expired. Sign in again to continue.');
+      const text = `Model request failed: ${error.message}`;
+      setMessages((previous) => [...previous.filter((item) => !item.isTyping), { role: 'assistant', content: text }]);
       setConnectionError(error.message);
-    } finally {
-      setIsLoading(false);
-    }
+    } finally { setIsLoading(false); }
   };
 
   const newChat = async () => {
     if (!historyService) return;
     const chat = await historyService.createChat();
-    setChats((previous) => [chat, ...previous]);
-    setCurrentChatId(chat.id);
-    setMessages([]);
-    setAttachmentIds([]);
-    setAttachmentItems([]);
-    setActiveView('chat');
-    setSidebarOpen(false);
+    setChats((previous) => [chat, ...previous]); setCurrentChatId(chat.id); setMessages([]); setAttachmentIds([]); setAttachmentItems([]); setActiveView('chat'); setSidebarOpen(false);
   };
-
   const selectChat = async (id) => {
     setMessages(await historyService.getChatMessages(id));
     const chat = chats.find((item) => item.id === id);
     const ids = Array.isArray(chat?.attachmentIds) ? chat.attachmentIds.slice(0, 8) : [];
     setAttachmentIds(ids);
     setAttachmentItems(workspaceData.uploads.filter((item) => ids.includes(item.id)).map((item) => ({ ...item, status: item.extraction?.warning ? 'warning' : 'ready' })));
-    setCurrentChatId(id);
-    setActiveView('chat');
-    setSidebarOpen(false);
+    setCurrentChatId(id); setActiveView('chat'); setSidebarOpen(false);
   };
-
   const persistAttachments = async (ids, chatId = currentChatId) => {
     const targetId = chatId || await ensureChat();
     await historyService.updateChatAttachments(targetId, ids);
     setChats((previous) => previous.map((chat) => chat.id === targetId ? { ...chat, attachmentIds: ids } : chat));
   };
-
   const selectFiles = async (fileList) => {
     const files = [...(fileList || [])];
     const available = Math.max(0, 8 - attachmentItems.filter((item) => item.status !== 'failed').length);
     if (files.length > available) setSessionNotice(`Only ${available} more attachment${available === 1 ? '' : 's'} can be added (eight maximum).`);
-    const targetChatId = files.slice(0, available).some((file) => file.size <= 10 * 1024 * 1024)
-      ? (currentChatId || await ensureChat())
-      : currentChatId;
+    const targetChatId = files.slice(0, available).some((file) => file.size <= 10 * 1024 * 1024) ? (currentChatId || await ensureChat()) : currentChatId;
     for (const file of files.slice(0, available)) {
       const localId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      if (file.size > 10 * 1024 * 1024) {
-        setAttachmentItems((previous) => [...previous, { localId, filename: file.name, status: 'failed', error: 'File exceeds the 10 MB limit.' }]);
-        continue;
-      }
+      if (file.size > 10 * 1024 * 1024) { setAttachmentItems((previous) => [...previous, { localId, filename: file.name, status: 'failed', error: 'File exceeds the 10 MB limit.' }]); continue; }
       setAttachmentItems((previous) => [...previous, { localId, filename: file.name, status: 'uploading' }]);
       try {
         const uploaded = await medicalApi.uploadFile(sessionToken, file);
         const status = uploaded.extraction?.warning ? 'warning' : 'ready';
         setAttachmentItems((previous) => previous.map((item) => item.localId === localId ? { ...uploaded, localId, status } : item));
-        setAttachmentIds((previous) => {
-          const next = [...previous, uploaded.id].slice(0, 8);
-          persistAttachments(next, targetChatId).catch((error) => setSessionNotice(error.message));
-          return next;
-        });
-      } catch (error) {
-        if (isAuthenticationError(error)) clearSession('Secure session expired. Verify a new session, then click the paperclip again.');
-        setAttachmentItems((previous) => previous.map((item) => item.localId === localId ? { ...item, status: 'failed', error: error.message } : item));
-      }
+        setAttachmentIds((previous) => { const next = [...previous, uploaded.id].slice(0, 8); persistAttachments(next, targetChatId).catch((error) => setSessionNotice(error.message)); return next; });
+      } catch (error) { setAttachmentItems((previous) => previous.map((item) => item.localId === localId ? { ...item, status: 'failed', error: error.message } : item)); }
     }
     refreshWorkspaceData();
   };
-
   const removeAttachment = (attachment) => {
     setAttachmentItems((previous) => previous.filter((item) => (item.localId || item.id) !== (attachment.localId || attachment.id)));
     if (!attachment.id) return;
-    setAttachmentIds((previous) => {
-      const next = previous.filter((id) => id !== attachment.id);
-      persistAttachments(next).catch((error) => setSessionNotice(error.message));
-      return next;
-    });
+    setAttachmentIds((previous) => { const next = previous.filter((id) => id !== attachment.id); persistAttachments(next).catch((error) => setSessionNotice(error.message)); return next; });
   };
-
   const deleteChat = async (id) => {
-    await historyService.deleteChat(id);
-    setChats((previous) => previous.filter((chat) => chat.id !== id));
-    if (id === currentChatId) {
-      setCurrentChatId(null);
-      setMessages([]);
-      setAttachmentIds([]);
-      setAttachmentItems([]);
-    }
+    await historyService.deleteChat(id); setChats((previous) => previous.filter((chat) => chat.id !== id));
+    if (id === currentChatId) { setCurrentChatId(null); setMessages([]); setAttachmentIds([]); setAttachmentItems([]); }
   };
+  const clear = async () => { if (currentChatId) await historyService.clearChatMessages(currentChatId); setMessages([]); loadChats(); };
+  const updateTitle = async (id, title) => { await historyService.updateChatTitle(id, title); loadChats(); };
+  const navigate = (view) => { setActiveView(['chat', 'evidence', 'tools'].includes(view) ? view : 'chat'); setSidebarOpen(false); };
 
-  const clear = async () => {
-    if (currentChatId) await historyService.clearChatMessages(currentChatId);
-    setMessages([]);
-    loadChats();
-  };
-
-  const updateTitle = async (id, title) => {
-    await historyService.updateChatTitle(id, title);
-    loadChats();
-  };
-
-  const navigate = (view) => {
-    if (view === 'chat' || view === 'evidence') {
-      setActiveView(view);
-      setSidebarOpen(false);
-      return;
-    }
-    setControlsOpen(true);
-    setSidebarOpen(false);
-  };
-
-  const closeControls = () => {
-    setControlsOpen(false);
-    refreshWorkspaceData();
-  };
-
+  if (!sessionToken) return <AuthPage onAuthenticated={authenticate} />;
   const freshness = platformStatus?.knowledge?.freshness;
   const selectedUploads = workspaceData.uploads.filter((item) => attachmentIds.includes(item.id));
   const evidenceUploads = selectedUploads.length ? selectedUploads : workspaceData.uploads;
+  const placeholder = !gatewayReady ? 'Waiting for local safety gateway…' : !modelReady ? 'Set PMAI_MODEL_ENDPOINT and PMAI_MODEL_NAME in .env…' : 'Ask a medical question…';
 
-  return (
-    <div className="medical-app">
-      <ChatHeader
-        onClearChat={clear}
-        hasMessages={messages.length > 0}
-        onToggleSidebar={() => setSidebarOpen((value) => !value)}
-        theme={theme}
-        onToggleTheme={() => setTheme(toggleTheme())}
-        freshness={freshness}
-        onOpenControls={() => setControlsOpen(true)}
-      />
-
-      <div className={`app-body ${activeView === 'evidence' ? 'evidence-mode' : ''}`}>
-        {sidebarOpen && <button className="mobile-scrim" onClick={() => setSidebarOpen(false)} aria-label="Close navigation"/>}
-        <ChatSidebar
-          chats={chats}
-          currentChatId={currentChatId}
-          onSelectChat={selectChat}
-          onNewChat={newChat}
-          onDeleteChat={deleteChat}
-          onUpdateChatTitle={updateTitle}
-          isOpen={sidebarOpen}
-          onClose={() => setSidebarOpen(false)}
-          activeView={activeView}
-          onNavigate={navigate}
-        />
-
-        {activeView === 'chat' ? <>
-          <main className="conversation-pane">
-            <div className="conversation-scroll">
-              <div className="conversation-width">
-                {messages.length === 0
-                  ? <WelcomeMessage onExampleClick={setExample}/>
-                  : messages.map((message, index) => <ChatMessage key={`${message.role}-${index}`} message={message.content} isUser={message.role === 'user'} isTyping={message.isTyping}/>)}
-                <div ref={endRef}/>
-              </div>
-            </div>
-            <ChatInput
-              onSendMessage={send}
-              isLoading={isLoading}
-              disabled={!ready}
-              exampleMessage={example}
-              placeholder={!modelReady ? 'Configure a custom model in Assistant controls…' : gatewayReady ? 'Ask a medical question…' : 'Waiting for local safety gateway…'}
-              authenticated={Boolean(sessionToken)}
-              attachments={attachmentItems}
-              onSelectFiles={selectFiles}
-              onRemoveAttachment={removeAttachment}
-              onAuthenticationRequired={() => { setControlsOpen(true); setSessionNotice('Verify a secure session, then click the paperclip again to choose files.'); }}
-            />
-          </main>
-        </> : <EvidenceWorkspace
-          messages={messages}
-          uploads={evidenceUploads}
-          profile={workspaceData.profile}
-          shares={workspaceData.shares}
-          freshness={freshness}
-          onManage={() => setControlsOpen(true)}
-          onBackToChat={() => setActiveView('chat')}
-        />}
-      </div>
-
-      <footer className="app-footer"><span>Automatic evidence routing</span><i/><span>Custom OpenAI-compatible endpoint</span><i/><span>Safety gateway · no stored provider key</span></footer>
-
-      <AssistantControlPanel
-        open={controlsOpen}
-        onClose={closeControls}
-        token={sessionToken}
-        onTokenChange={changeToken}
-        modelSettings={modelSettings}
-        onModelSettingsChange={changeModelSettings}
-        messages={messages}
-      />
-
-      {sessionNotice && <div className="toast-error session-warning"><strong>Assistant settings</strong><span>{sessionNotice}</span></div>}
-      {connectionError && <div className="toast-error"><strong>Model or gateway unavailable</strong><span>{connectionError}</span></div>}
+  return <div className="medical-app">
+    <ChatHeader onClearChat={clear} hasMessages={messages.length > 0} onToggleSidebar={() => setSidebarOpen((value) => !value)} theme={theme} onToggleTheme={() => setTheme(toggleTheme())} freshness={freshness} accountEmail={accountEmail} onSignOut={() => clearSession()} />
+    <div className={`app-body ${activeView === 'evidence' ? 'evidence-mode' : ''}`}>
+      {sidebarOpen && <button className="mobile-scrim" onClick={() => setSidebarOpen(false)} aria-label="Close navigation"/>}
+      <ChatSidebar chats={chats} currentChatId={currentChatId} onSelectChat={selectChat} onNewChat={newChat} onDeleteChat={deleteChat} onUpdateChatTitle={updateTitle} isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} activeView={activeView} onNavigate={navigate} />
+      {activeView === 'chat' && <main className="conversation-pane"><div className="conversation-scroll"><div className="conversation-width">{messages.length === 0 ? <WelcomeMessage onExampleClick={setExample}/> : messages.map((message, index) => <ChatMessage key={`${message.role}-${index}`} message={message.content} isUser={message.role === 'user'} isTyping={message.isTyping}/>)}<div ref={endRef}/></div></div><ChatInput onSendMessage={send} isLoading={isLoading} disabled={!ready} exampleMessage={example} placeholder={placeholder} authenticated attachments={attachmentItems} onSelectFiles={selectFiles} onRemoveAttachment={removeAttachment}/></main>}
+      {activeView === 'evidence' && <EvidenceWorkspace messages={messages} uploads={evidenceUploads} profile={workspaceData.profile} shares={workspaceData.shares} freshness={freshness} onManage={() => navigate('tools')} onBackToChat={() => navigate('chat')} />}
+      {activeView === 'tools' && <ToolWorkspace status={platformStatus} attachmentCount={attachmentIds.length} onOpenEvidence={() => navigate('evidence')} />}
     </div>
-  );
+    <footer className="app-footer"><span>Automatic evidence routing</span><i/><span>Local model from .env</span><i/><span>Safety gateway · encrypted user data</span></footer>
+    {sessionNotice && <div className="toast-error session-warning"><strong>Account</strong><span>{sessionNotice}</span></div>}
+    {connectionError && <div className="toast-error"><strong>Gateway unavailable</strong><span>{connectionError}</span></div>}
+  </div>;
 }

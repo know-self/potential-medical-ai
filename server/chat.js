@@ -1,4 +1,5 @@
 import { consumeTenantBudget } from './capacity.js';
+import { config } from './config.js';
 import { knowledgePlane } from './knowledgeClient.js';
 import { generateRoutedResponse, planRetrieval } from './modelRouter.js';
 import { normalizeModelSettings } from './models.js';
@@ -141,7 +142,7 @@ export async function streamMedicalChat(body, response, context = {}) {
   const question = String(body.message || body.question || '').trim();
   if (!question) throw new Error('message is required');
   const history = Array.isArray(body.history) ? body.history.slice(-20) : [];
-  const settings = normalizeModelSettings(body.model || {});
+  const settings = normalizeModelSettings(config.model);
   const selectedAttachments = Array.isArray(context.attachments) ? context.attachments : [];
   const route = planRetrieval({ question, attachments: selectedAttachments });
   const patientContext = settings.includePatientContext ? context.patientContext || null : null;

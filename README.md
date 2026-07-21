@@ -19,13 +19,7 @@ pmai dev --open
 
 The browser opens at `http://localhost:3000`.
 
-Open **Assistant controls → Custom model runtime**, then configure:
-
-- **Answer mode**: Direct Model, Document RAG, or Knowledge RAG.
-- **Endpoint**: an OpenAI-compatible chat-completions endpoint.
-- **Model**: the model identifier expected by that endpoint.
-- **API key**: optional for local models.
-- Temperature, maximum output tokens, optional system instruction, and optional custom headers.
+Configure the local gateway before starting the app by setting `PMAI_MODEL_ENDPOINT`, `PMAI_MODEL_NAME`, and (when required) `PMAI_MODEL_API_KEY` in `.env`. Temperature, maximum output tokens, an optional system instruction, and optional request headers are also configured there.
 
 Example endpoints:
 
@@ -35,17 +29,13 @@ http://127.0.0.1:1234/v1/chat/completions
 http://localhost:11434/v1/chat/completions
 ```
 
-The model endpoint, API key, and headers are stored only in the current browser tab using `sessionStorage`. They are sent through the local safety gateway for each request and are never written to `.env`, server logs, or server-side persistence by the application.
+The gateway reads model credentials from its local environment; they are not exposed to browser storage. Users sign in with email/password before opening the chat workspace, which keeps uploads and private context account-scoped.
 
-### Answer modes
+### Automatic evidence routing
 
-**Direct Model** is the default. It uses the selected model directly and does not query the Knowledge Control Plane.
+Attached documents are always routed to retrieval with `[D#]` source markers. The local knowledge plane is selected automatically for evidence-sensitive or high-sensitivity medical questions, while greetings and simple conversation skip it. The Tools page makes each local orchestration step visible without exposing model credentials or requiring a manual mode choice.
 
-**Document RAG** adds only the selected uploaded document extractions and optional consented patient context to the prompt.
-
-**Knowledge RAG** adds versioned Knowledge Control Plane results, source freshness, conflict metadata, selected document extractions, and optional consented context.
-
-The local gateway remains in the path for emergency/safety screening, rate limits, secure-session handling, upload access control, endpoint network policy, and streaming normalization. The model never needs to be configured on the server.
+The local gateway remains in the path for emergency/safety screening, rate limits, account handling, upload access control, endpoint network policy, and streaming normalization.
 
 ## Custom endpoint security policy
 
@@ -88,7 +78,6 @@ Or with generic environment variables:
 PMAI_MODEL_ENDPOINT=http://127.0.0.1:1234/v1
 PMAI_MODEL_NAME=local-model
 PMAI_MODEL_API_KEY=
-PMAI_MODEL_MODE=direct
 PMAI_MODEL_TEMPERATURE=0.2
 PMAI_MODEL_MAX_TOKENS=4096
 ```
@@ -220,7 +209,7 @@ Gateway:
 
 - `GET /api/health`, `/api/status`
 - `GET /api/knowledge/status`, `/api/knowledge/search`, `/api/knowledge/terminology`
-- `POST /api/chat/stream` with per-request custom model settings
+- `POST /api/chat/stream` using the gateway's environment-configured model
 - Privacy/context, sharing, uploads, labs, and image-boundary endpoints
 
 ## Validation

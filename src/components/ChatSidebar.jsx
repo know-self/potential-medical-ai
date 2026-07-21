@@ -1,13 +1,11 @@
 import React from 'react';
-import { Activity, BookOpen, Clock3, MessageCircle, Plus, Settings, ShieldCheck, Stethoscope, Trash2, Users } from 'lucide-react';
+import { Activity, BookOpen, Clock3, MessageCircle, Plus, ShieldCheck, Stethoscope, Trash2 } from 'lucide-react';
 import ChatNameEditor from './ChatNameEditor';
 
 const nav = [
   { id: 'chat', label: 'Chat', Icon: MessageCircle },
-  { id: 'patients', label: 'Patients', Icon: Users },
   { id: 'evidence', label: 'Evidence', Icon: BookOpen },
-  { id: 'tools', label: 'Tools', Icon: Activity },
-  { id: 'settings', label: 'Settings', Icon: Settings }
+  { id: 'tools', label: 'Tools', Icon: Activity }
 ];
 
 function formatDate(value) {

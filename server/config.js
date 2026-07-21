@@ -142,6 +142,16 @@ export const config = {
     maxMessageCharacters: numberFromEnv('CUSTOM_MODEL_MAX_MESSAGE_CHARACTERS', 40000),
     maxOutputTokens: numberFromEnv('CUSTOM_MODEL_MAX_OUTPUT_TOKENS', 32768)
   },
+  model: {
+    endpoint: process.env.PMAI_MODEL_ENDPOINT || '',
+    model: process.env.PMAI_MODEL_NAME || '',
+    apiKey: process.env.PMAI_MODEL_API_KEY || '',
+    temperature: numberFromEnv('PMAI_MODEL_TEMPERATURE', 0.2),
+    maxTokens: numberFromEnv('PMAI_MODEL_MAX_TOKENS', 4096),
+    systemPrompt: process.env.PMAI_MODEL_SYSTEM_PROMPT || '',
+    includePatientContext: booleanFromEnv('PMAI_MODEL_INCLUDE_PATIENT_CONTEXT', false),
+    headers: jsonObjectFromEnv('PMAI_MODEL_HEADERS_JSON')
+  },
   // Transitional empty values keep older health consumers readable. No provider credentials are loaded or used.
   openRouter: { apiKey: '' },
   google: { apiKey: '' },

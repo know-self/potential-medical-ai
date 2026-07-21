@@ -216,7 +216,8 @@ export function createMedicalServer() {
           knowledge,
           models: {
             openRouterConfigured: Boolean(config.openRouter.apiKey),
-            googleConfigured: Boolean(config.google.apiKey)
+            googleConfigured: Boolean(config.google.apiKey),
+            configured: Boolean(config.model.endpoint && config.model.model)
           },
           capabilities: capabilityState,
           capacity: capacityStatus(),

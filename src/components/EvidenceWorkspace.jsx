@@ -103,7 +103,7 @@ export default function EvidenceWorkspace({ messages = [], uploads = [], profile
           </div>
         </div>}
 
-        {activeTab === 'Review' && <div className="focused-workspace"><ShieldCheck size={36}/><h2>Clinical review workspace</h2><p>Open Assistant controls to manage review status, source governance and version history. Distinct reviewer identities remain required for high-risk changes.</p><button type="button" onClick={onManage}>Open review controls</button></div>}
+        {activeTab === 'Review' && <div className="focused-workspace"><ShieldCheck size={36}/><h2>Clinical review workspace</h2><p>Review the local routing and provenance status in Tools. Distinct reviewer identities remain required for high-risk changes.</p><button type="button" onClick={onManage}>Open tools</button></div>}
         {activeTab === 'Share' && <div className="focused-workspace"><LockKeyhole size={36}/><h2>Secure clinician sharing</h2><p>Create expiring, revocable links with redaction, consent snapshots and access auditing.</p><button type="button" onClick={onManage}>Manage secure sharing</button></div>}
         {activeTab === 'Timeline' && <div className="focused-workspace"><Clock3 size={36}/><h2>Longitudinal timeline</h2><p>Timeline events remain encrypted, user-confirmed and separate from model-generated claims.</p><button type="button" onClick={onManage}>Manage timeline</button></div>}
       </div>
