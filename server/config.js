@@ -141,6 +141,9 @@ export const config = {
     maxMessageCharacters: numberFromEnv('CUSTOM_MODEL_MAX_MESSAGE_CHARACTERS', 40000),
     maxOutputTokens: numberFromEnv('CUSTOM_MODEL_MAX_OUTPUT_TOKENS', 32768)
   },
+  // Transitional empty values keep older health consumers readable. No provider credentials are loaded or used.
+  openRouter: { apiKey: '' },
+  google: { apiKey: '' },
 
   pubmed: {
     apiKey: process.env.NCBI_API_KEY || '',
