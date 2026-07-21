@@ -59,7 +59,8 @@ async function gatewayHealth() {
     ...payload,
     gatewayReachable: true,
     gatewayHttpStatus: response.status,
-    status: payload.status || (response.ok ? 'ok' : 'degraded')
+    knowledgeStatus: payload.status || (response.ok ? 'ok' : 'degraded'),
+    status: 'ok'
   };
 }
 
