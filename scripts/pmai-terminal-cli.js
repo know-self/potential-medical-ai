@@ -23,7 +23,7 @@ export function parseTerminalArgs(argv = []) {
     explicitTerminalCommand = true;
   }
   const values = { command, positionals: [] };
-  const booleans = new Set(['no-start', 'json', 'no-color', 'no-sync', 'help']);
+  const booleans = new Set(['no-start', 'json', 'no-color', 'no-sync', 'help', 'include-patient-context']);
   const aliases = { h: 'help' };
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
@@ -64,6 +64,12 @@ function integerPort(value, fallback, label) {
   const port = Number(value ?? fallback);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`${label} must be between 1 and 65535`);
   return port;
+}
+
+function numeric(value, fallback, min, max, label) {
+  const number = Number(value ?? fallback);
+  if (!Number.isFinite(number) || number < min || number > max) throw new Error(`${label} must be between ${min} and ${max}`);
+  return number;
 }
 
 function localGateway(value) {
@@ -116,7 +122,7 @@ function stopChild(child, signal = 'SIGTERM') {
   }
 }
 
-async function waitFor(url, child, timeoutMs = 30_000) {
+async function waitFor(url, child, timeoutMs = 30000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     if (child && child.exitCode !== null) throw new Error(`Local service exited before ${url} became reachable`);
@@ -127,7 +133,7 @@ async function waitFor(url, child, timeoutMs = 30_000) {
   throw new Error(`Timed out waiting for ${url}`);
 }
 
-async function startLocalTerminalRuntime({ env, gatewayUrl, gatewayPort, knowledgePort, noSync }) {
+async function startLocalTerminalRuntime({ env, gatewayUrl, gatewayPort, knowledgePort, noSync, mode }) {
   const children = [];
   const knowledgeUrl = `http://127.0.0.1:${knowledgePort}/health`;
   const gatewayHealthUrl = `${gatewayUrl}/api/health`;
@@ -143,15 +149,23 @@ async function startLocalTerminalRuntime({ env, gatewayUrl, gatewayPort, knowled
     SYNC_ENABLED: noSync ? 'false' : (env.SYNC_ENABLED || 'true')
   };
 
-  if (!(await reachable(knowledgeUrl)).reachable) {
+  if (mode === 'knowledge-rag' && !(await reachable(knowledgeUrl)).reachable) {
     process.stderr.write('Starting local knowledge plane…\n');
-    const knowledge = spawnLocal('knowledge', 'knowledge-plane/server.js', serviceEnv);
+    const knowledge = spawnLocal('knowledge', 'scripts/service-bootstrap.js', { ...serviceEnv, PMAI_BOOTSTRAP_SERVICE: 'knowledge' });
+    knowledge.spawnargs = [process.execPath, 'scripts/service-bootstrap.js', 'knowledge'];
     children.push(knowledge);
     await waitFor(knowledgeUrl, knowledge);
   }
   if (!(await reachable(gatewayHealthUrl)).reachable) {
     process.stderr.write('Starting local chat gateway…\n');
-    const gateway = spawnLocal('gateway', 'server/server.js', serviceEnv);
+    const gateway = spawn(process.execPath, ['scripts/service-bootstrap.js', 'gateway'], {
+      cwd: root,
+      env: serviceEnv,
+      detached: process.platform !== 'win32',
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    prefix(gateway.stdout, 'gateway');
+    prefix(gateway.stderr, 'gateway');
     children.push(gateway);
     await waitFor(gatewayHealthUrl, gateway);
   }
@@ -184,28 +198,34 @@ Usage:
   pmai status                  Check running services
   pmai sync                    Trigger authenticated knowledge sync
 
-Terminal options:
+Custom model options:
+  --model-endpoint <url>       OpenAI-compatible chat-completions endpoint
+  --model <name>               Model identifier required by the endpoint
+  --model-key <key>            Optional API key; kept only in this process
+  --mode <mode>                direct, document-rag, or knowledge-rag
+  --temperature <number>       0 to 2
+  --max-tokens <number>        64 to 32768
+  --system-prompt <text>       Additional instruction after core safety rules
+  --include-patient-context    Include consented context when a session token is set
+
+Other terminal options:
   --gateway-url <url>          Use an existing local or remote gateway
   --session-token <token>      Private user session token for context/uploads
   --locale <locale>            auto, en, vi, or another supported locale
-  --no-start                   Do not auto-start local knowledge/gateway services
+  --no-start                   Do not auto-start local services
   --no-sync                    Disable source sync when auto-starting locally
   --json                       JSON output for one-shot asks
   --no-color                   Disable ANSI styling
   --env-file <path>            Load another environment file
   --gateway-port <port>        Local auto-start gateway port (default 8787)
-  --knowledge-port <port>      Local auto-start knowledge port (default 8790)
+  --knowledge-port <port>      Local knowledge port (default 8790)
 
-Setup as a global-style command:
-  npm install
-  npm link
-  pmai
+Environment equivalents:
+  PMAI_MODEL_ENDPOINT, PMAI_MODEL_NAME, PMAI_MODEL_API_KEY, PMAI_MODEL_MODE
 
 Examples:
-  pmai
-  pmai "Summarize current heart-failure guidance"
-  echo "Explain SGLT2 inhibitors" | pmai
-  pmai --gateway-url https://medical.example.com --no-start
+  pmai --model-endpoint http://127.0.0.1:1234/v1 --model local-model
+  pmai ask "Explain CKD staging" --model-endpoint https://models.example.com/v1 --model med-model --model-key secret
   pmai dev --open
 `);
 }
@@ -224,12 +244,27 @@ export async function runTerminalCli(argv = process.argv.slice(2)) {
   if (args.command === 'ask' && !initialPrompt) throw new Error('A question is required');
   if (!interactive && !initialPrompt) throw new Error('No prompt received. Run pmai in a terminal or pass a question.');
 
+  const modelSettings = {
+    endpoint: args['model-endpoint'] || env.PMAI_MODEL_ENDPOINT || '',
+    model: args.model || env.PMAI_MODEL_NAME || '',
+    apiKey: args['model-key'] || env.PMAI_MODEL_API_KEY || '',
+    mode: args.mode || env.PMAI_MODEL_MODE || 'direct',
+    temperature: numeric(args.temperature, env.PMAI_MODEL_TEMPERATURE || 0.2, 0, 2, 'temperature'),
+    maxTokens: Math.round(numeric(args['max-tokens'], env.PMAI_MODEL_MAX_TOKENS || 4096, 64, 32768, 'max tokens')),
+    systemPrompt: args['system-prompt'] || env.PMAI_MODEL_SYSTEM_PROMPT || '',
+    includePatientContext: Boolean(args['include-patient-context']) || env.PMAI_MODEL_INCLUDE_PATIENT_CONTEXT === 'true',
+    headers: {}
+  };
+  if (!modelSettings.endpoint || !modelSettings.model) {
+    throw new Error('Configure a custom model with --model-endpoint and --model, or PMAI_MODEL_ENDPOINT and PMAI_MODEL_NAME');
+  }
+
   if (!existsSync(path.join(root, 'package.json'))) throw new Error('Run pmai from an installed Potential Medical AI package');
   let cleanup = async () => {};
   const canAutoStart = !args['no-start'] && !explicitGateway && localGateway(gatewayUrl);
   if (!(await reachable(`${gatewayUrl}/api/health`)).reachable && canAutoStart) {
     if (!existsSync(path.join(root, 'node_modules'))) throw new Error('node_modules is missing. Run npm install first.');
-    cleanup = await startLocalTerminalRuntime({ env, gatewayUrl, gatewayPort, knowledgePort, noSync: Boolean(args['no-sync']) });
+    cleanup = await startLocalTerminalRuntime({ env, gatewayUrl, gatewayPort, knowledgePort, noSync: Boolean(args['no-sync']), mode: modelSettings.mode });
   }
 
   try {
@@ -237,6 +272,7 @@ export async function runTerminalCli(argv = process.argv.slice(2)) {
       gatewayUrl,
       token: args['session-token'] || env.PMAI_SESSION_TOKEN || '',
       locale: args.locale || env.PMAI_LOCALE || 'auto',
+      modelSettings,
       color: !args['no-color'],
       json: Boolean(args.json),
       initialPrompt,
