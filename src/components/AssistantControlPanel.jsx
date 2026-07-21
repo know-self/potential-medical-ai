@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { medicalApi } from '../services/apiClient';
+import { isAuthenticationError, medicalApi } from '../services/apiClient';
 
 function splitList(value) {
   return String(value || '').split(',').map((item) => item.trim()).filter(Boolean);
@@ -14,6 +14,7 @@ export default function AssistantControlPanel({
   selectedAttachmentIds,
   onSelectedAttachmentIdsChange
 }) {
+  const [tokenDraft, setTokenDraft] = useState(token);
   const [profile, setProfile] = useState(null);
   const [uploads, setUploads] = useState([]);
   const [shares, setShares] = useState([]);
@@ -33,28 +34,83 @@ export default function AssistantControlPanel({
     diagnoses: splitList(contextForm.diagnoses)
   }), [contextForm]);
 
+  useEffect(() => {
+    if (open) setTokenDraft(token);
+  }, [open, token]);
+
+  function resetPrivateState() {
+    setProfile(null);
+    setUploads([]);
+    setShares([]);
+    onSelectedAttachmentIdsChange([]);
+  }
+
+  function applyProfile(nextProfile) {
+    setProfile(nextProfile);
+    const context = nextProfile.context || {};
+    setContextForm({
+      ageRange: context.ageRange || '',
+      medications: (context.medications || []).join(', '),
+      allergies: (context.allergies || []).join(', '),
+      diagnoses: (context.diagnoses || []).join(', '),
+      pregnancyStatus: context.pregnancyStatus || '',
+      preferredLanguage: context.preferredLanguage || 'vi'
+    });
+  }
+
+  async function loadSessionData(sessionToken, verifiedProfile = null) {
+    // Verify once before fan-out so an invalid token cannot generate three 401s.
+    const nextProfile = verifiedProfile || await medicalApi.getProfile(sessionToken);
+    const [uploadPayload, sharePayload] = await Promise.all([
+      medicalApi.listUploads(sessionToken),
+      medicalApi.listShares(sessionToken)
+    ]);
+    applyProfile(nextProfile);
+    setUploads(uploadPayload.uploads || []);
+    setShares(sharePayload.shares || []);
+    return nextProfile;
+  }
+
+  function handlePrivateError(error) {
+    if (isAuthenticationError(error)) {
+      onTokenChange('');
+      setTokenDraft('');
+      resetPrivateState();
+      setStatus('Secure session expired or is invalid. It was cleared; paste and verify a new token.');
+      return;
+    }
+    setStatus(error.message);
+  }
+
   async function refresh() {
     if (!token) return;
     try {
-      const [nextProfile, uploadPayload, sharePayload] = await Promise.all([
-        medicalApi.getProfile(token),
-        medicalApi.listUploads(token),
-        medicalApi.listShares(token)
-      ]);
-      setProfile(nextProfile);
-      setUploads(uploadPayload.uploads || []);
-      setShares(sharePayload.shares || []);
-      const context = nextProfile.context || {};
-      setContextForm({
-        ageRange: context.ageRange || '',
-        medications: (context.medications || []).join(', '),
-        allergies: (context.allergies || []).join(', '),
-        diagnoses: (context.diagnoses || []).join(', '),
-        pregnancyStatus: context.pregnancyStatus || '',
-        preferredLanguage: context.preferredLanguage || 'vi'
-      });
+      await loadSessionData(token);
       setStatus('Secure profile loaded.');
     } catch (error) {
+      handlePrivateError(error);
+    }
+  }
+
+  async function applySession() {
+    const candidate = tokenDraft.trim();
+    if (!candidate) {
+      onTokenChange('');
+      resetPrivateState();
+      setStatus('Secure session cleared.');
+      return;
+    }
+    try {
+      setStatus('Verifying secure session…');
+      const verifiedProfile = await medicalApi.getProfile(candidate);
+      await loadSessionData(candidate, verifiedProfile);
+      onTokenChange(candidate);
+      setStatus('Secure session verified and stored for this browser tab.');
+    } catch (error) {
+      if (isAuthenticationError(error)) {
+        setStatus('Token was rejected. The current committed session was not changed.');
+        return;
+      }
       setStatus(error.message);
     }
   }
@@ -75,7 +131,7 @@ export default function AssistantControlPanel({
       await refresh();
       setStatus('Consent recorded.');
     } catch (error) {
-      setStatus(error.message);
+      handlePrivateError(error);
     }
   }
 
@@ -85,7 +141,7 @@ export default function AssistantControlPanel({
       await refresh();
       setStatus('Patient-provided context saved.');
     } catch (error) {
-      setStatus(error.message);
+      handlePrivateError(error);
     }
   }
 
@@ -98,7 +154,7 @@ export default function AssistantControlPanel({
       await refresh();
       setStatus('Upload stored with extraction metadata.');
     } catch (error) {
-      setStatus(error.message);
+      handlePrivateError(error);
     } finally {
       event.target.value = '';
     }
@@ -118,7 +174,7 @@ export default function AssistantControlPanel({
       await refresh();
       setStatus(`Secure share created and copied. Expires ${result.expiresAt}`);
     } catch (error) {
-      setStatus(error.message);
+      handlePrivateError(error);
     }
   }
 
@@ -129,7 +185,7 @@ export default function AssistantControlPanel({
       await refresh();
       setStatus('User-confirmed timeline event added.');
     } catch (error) {
-      setStatus(error.message);
+      handlePrivateError(error);
     }
   }
 
@@ -138,7 +194,7 @@ export default function AssistantControlPanel({
       await medicalApi.downloadExport(token, format);
       setStatus(`Clinician export created (${format}).`);
     } catch (error) {
-      setStatus(error.message);
+      handlePrivateError(error);
     }
   }
 
@@ -165,9 +221,13 @@ export default function AssistantControlPanel({
 
         <section className="border rounded-lg p-3 mb-4">
           <h3 className="font-medium">Secure session</h3>
-          <p className="text-xs text-gray-500 mb-2">Paste a short-lived user session token issued by the configured identity/bootstrap flow. Stored only in sessionStorage.</p>
-          <input className="w-full border rounded p-2" type="password" value={token} onChange={(event) => onTokenChange(event.target.value)} placeholder="User session token" />
-          <button className="mt-2 px-3 py-2 border rounded" disabled={!authenticated} onClick={refresh}>Load profile</button>
+          <p className="text-xs text-gray-500 mb-2">Paste a short-lived user session token. It is verified once before being committed to sessionStorage; typing never sends partial tokens.</p>
+          <input className="w-full border rounded p-2" type="password" value={tokenDraft} onChange={(event) => setTokenDraft(event.target.value)} placeholder="User session token" autoComplete="off" />
+          <div className="flex gap-2 mt-2">
+            <button className="px-3 py-2 rounded bg-blue-700 text-white" disabled={!tokenDraft.trim()} onClick={applySession}>Verify and use</button>
+            <button className="px-3 py-2 border rounded" disabled={!authenticated && !tokenDraft} onClick={() => { setTokenDraft(''); onTokenChange(''); resetPrivateState(); setStatus('Secure session cleared.'); }}>Clear</button>
+            <button className="px-3 py-2 border rounded" disabled={!authenticated} onClick={refresh}>Reload</button>
+          </div>
         </section>
 
         <section className="border rounded-lg p-3 mb-4">
@@ -226,7 +286,7 @@ export default function AssistantControlPanel({
           {labResult && <pre className="mt-2 p-2 bg-gray-100 dark:bg-gray-800 text-xs whitespace-pre-wrap">{JSON.stringify(labResult, null, 2)}</pre>}
         </section>
 
-        <div className="text-xs text-gray-600 break-words">{status}</div>
+        <div className="text-xs text-gray-600 break-words" role="status">{status}</div>
       </aside>
     </div>
   );
