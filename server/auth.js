@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 
+const inspectSymbol = Symbol.for('nodejs.util.inspect.custom');
+
 function encode(value) {
   return Buffer.from(JSON.stringify(value)).toString('base64url');
 }
@@ -18,6 +20,13 @@ export class AuthenticationError extends Error {
     this.name = 'AuthenticationError';
     this.code = code;
     this.statusCode = statusCode;
+    // These are expected client failures, not server crashes. Keep accidental
+    // console logging compact while preserving structured status/code fields.
+    this.stack = undefined;
+  }
+
+  [inspectSymbol]() {
+    return `${this.name} [${this.code}]: ${this.message}`;
   }
 }
 
