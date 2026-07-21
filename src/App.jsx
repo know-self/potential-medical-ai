@@ -9,9 +9,8 @@ import EvidenceWorkspace from './components/EvidenceWorkspace';
 import WelcomeMessage from './components/WelcomeMessage';
 import { isAuthenticationError, medicalApi } from './services/apiClient';
 import { ChatHistoryService } from './services/chatHistory';
+import { emptySessionWorkspace, loadSessionWorkspace } from './services/sessionWorkspace';
 import { getTheme, initializeTheme, toggleTheme } from './utils/theme';
-
-const emptyWorkspaceData = { profile: null, uploads: [], shares: [] };
 
 export default function App() {
   const [messages, setMessages] = useState([]);
@@ -30,7 +29,7 @@ export default function App() {
   const [activeView, setActiveView] = useState('chat');
   const [sessionToken, setSessionToken] = useState(() => sessionStorage.getItem('medical-user-session') || '');
   const [attachmentIds, setAttachmentIds] = useState([]);
-  const [workspaceData, setWorkspaceData] = useState(emptyWorkspaceData);
+  const [workspaceData, setWorkspaceData] = useState(emptySessionWorkspace);
   const endRef = useRef(null);
 
   useEffect(() => {
@@ -78,7 +77,7 @@ export default function App() {
     setSessionToken('');
     sessionStorage.removeItem('medical-user-session');
     setAttachmentIds([]);
-    setWorkspaceData(emptyWorkspaceData);
+    setWorkspaceData(emptySessionWorkspace);
     if (notice) setSessionNotice(notice);
   }, []);
 
@@ -89,35 +88,24 @@ export default function App() {
     else {
       sessionStorage.removeItem('medical-user-session');
       setAttachmentIds([]);
-      setWorkspaceData(emptyWorkspaceData);
+      setWorkspaceData(emptySessionWorkspace);
     }
     setSessionNotice('');
   }, []);
 
   const refreshWorkspaceData = useCallback(async () => {
     if (!sessionToken) {
-      setWorkspaceData(emptyWorkspaceData);
+      setWorkspaceData(emptySessionWorkspace);
       return;
     }
     try {
-      // Validate the committed token first. This prevents three concurrent 401s
-      // when a stale token is restored from sessionStorage.
-      const profile = await medicalApi.getProfile(sessionToken);
-      const [uploads, shares] = await Promise.all([
-        medicalApi.listUploads(sessionToken),
-        medicalApi.listShares(sessionToken)
-      ]);
-      setWorkspaceData({
-        profile,
-        uploads: uploads.uploads || [],
-        shares: shares.shares || []
-      });
+      setWorkspaceData(await loadSessionWorkspace(medicalApi, sessionToken));
     } catch (error) {
       if (isAuthenticationError(error)) {
         clearSession('Secure session expired or became invalid. It was removed; public chat remains available.');
         return;
       }
-      setWorkspaceData(emptyWorkspaceData);
+      setWorkspaceData(emptySessionWorkspace);
     }
   }, [clearSession, sessionToken]);
 
