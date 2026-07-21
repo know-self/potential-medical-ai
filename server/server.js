@@ -3,6 +3,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bearerToken } from './auth.js';
+import { initializeUserAuth, loginUser, registerUser } from './userAuth.js';
 import { capacityStatus } from './capacity.js';
 import { streamMedicalChat } from './chat.js';
 import { config } from './config.js';
@@ -44,7 +45,8 @@ const rateBuckets = new Map();
 const capabilityState = {
   privacy: { configured: false, error: null },
   sharing: { configured: false, error: null },
-  uploads: { configured: false, error: null }
+  uploads: { configured: false, error: null },
+  auth: { configured: false, error: null }
 };
 
 const MIME_TYPES = {
@@ -160,7 +162,8 @@ async function initializeOptionalCapabilities() {
   for (const [name, initializer] of Object.entries({
     privacy: initializePrivacy,
     sharing: initializeSharing,
-    uploads: initializeUploads
+    uploads: initializeUploads,
+    auth: initializeUserAuth
   })) {
     try {
       await initializer();
@@ -220,6 +223,16 @@ export function createMedicalServer() {
           localClinicalProcessing: false,
           timestamp: new Date().toISOString()
         });
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/auth/register') {
+        json(response, 201, await registerUser(await readJson(request)));
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/auth/login') {
+        json(response, 200, await loginUser(await readJson(request)));
         return;
       }
 

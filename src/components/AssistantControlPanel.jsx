@@ -20,7 +20,8 @@ export default function AssistantControlPanel({
   onModelSettingsChange,
   messages,
 }) {
-  const [tokenDraft, setTokenDraft] = useState(token);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [modelDraft, setModelDraft] = useState(modelSettings || defaultModelSettings);
   const [customHeadersText, setCustomHeadersText] = useState(headersText(modelSettings?.headers));
   const [profile, setProfile] = useState(null);
@@ -44,7 +45,6 @@ export default function AssistantControlPanel({
 
   useEffect(() => {
     if (!open) return;
-    setTokenDraft(token);
     setModelDraft(modelSettings || defaultModelSettings);
     setCustomHeadersText(headersText(modelSettings?.headers));
   }, [open, token, modelSettings]);
@@ -97,25 +97,18 @@ export default function AssistantControlPanel({
     }
   }
 
-  async function applySession() {
-    const candidate = tokenDraft.trim();
-    if (!candidate) {
-      onTokenChange('');
-      resetPrivateState();
-      setStatus('Secure session cleared.');
-      return;
-    }
+  async function authenticate(action) {
     try {
-      setStatus('Verifying secure session…');
-      const verifiedProfile = await medicalApi.getProfile(candidate);
-      await loadSessionData(candidate, verifiedProfile);
-      onTokenChange(candidate);
-      setStatus('Secure session verified and stored for this browser tab.');
+      setStatus(action === 'register' ? 'Creating account…' : 'Signing in…');
+      const result = action === 'register'
+        ? await medicalApi.register({ email, password })
+        : await medicalApi.login({ email, password });
+      const verifiedProfile = await medicalApi.getProfile(result.token);
+      await loadSessionData(result.token, verifiedProfile);
+      onTokenChange(result.token);
+      setPassword('');
+      setStatus(`Signed in as ${result.user.email}.`);
     } catch (error) {
-      if (isAuthenticationError(error)) {
-        setStatus('Token was rejected. The current committed session was not changed.');
-        return;
-      }
       setStatus(error.message);
     }
   }
@@ -268,14 +261,20 @@ export default function AssistantControlPanel({
         </section>
 
         <section className="border rounded-lg p-3 mb-4">
-          <h3 className="font-medium">Secure session</h3>
-          <p className="text-xs text-gray-500 mb-2">Paste a short-lived user session token. It is verified once before being committed to sessionStorage; typing never sends partial tokens.</p>
-          <input className="w-full border rounded p-2" type="password" value={tokenDraft} onChange={(event) => setTokenDraft(event.target.value)} placeholder="User session token" autoComplete="off" autoFocus={!authenticated} />
-          <div className="flex gap-2 mt-2">
-            <button className="px-3 py-2 rounded bg-blue-700 text-white" disabled={!tokenDraft.trim()} onClick={applySession}>Verify and use</button>
-            <button className="px-3 py-2 border rounded" disabled={!authenticated && !tokenDraft} onClick={() => { setTokenDraft(''); onTokenChange(''); resetPrivateState(); setStatus('Secure session cleared.'); }}>Clear</button>
-            <button className="px-3 py-2 border rounded" disabled={!authenticated} onClick={refresh}>Reload</button>
-          </div>
+          <h3 className="font-medium">Account</h3>
+          <p className="text-xs text-gray-500 mb-2">Sign in to encrypt and access your private uploads, health context, and clinician shares.</p>
+          {!authenticated ? <>
+            <input className="w-full border rounded p-2 mb-2" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email address" autoComplete="email" autoFocus />
+            <input className="w-full border rounded p-2" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password (at least 12 characters)" autoComplete="current-password" />
+            <div className="flex gap-2 mt-2">
+              <button className="px-3 py-2 rounded bg-blue-700 text-white" disabled={!email.trim() || !password} onClick={() => authenticate('login')}>Sign in</button>
+              <button className="px-3 py-2 border rounded" disabled={!email.trim() || !password} onClick={() => authenticate('register')}>Create account</button>
+            </div>
+          </> : <div className="flex gap-2 mt-2">
+            <span className="text-xs py-2 text-emerald-700 dark:text-emerald-300">Signed in with a secure session.</span>
+            <button className="px-3 py-2 border rounded" onClick={() => { onTokenChange(''); resetPrivateState(); setStatus('Signed out.'); }}>Sign out</button>
+            <button className="px-3 py-2 border rounded" onClick={refresh}>Reload</button>
+          </div>}
         </section>
 
         <section className="border rounded-lg p-3 mb-4">

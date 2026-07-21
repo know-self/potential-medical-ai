@@ -152,6 +152,8 @@ async function downloadExport(token, format = 'fhir') {
 
 export const medicalApi = {
   health: gatewayHealth,
+  register: (payload) => apiRequest('/api/auth/register', { method: 'POST', body: JSON.stringify(payload) }),
+  login: (payload) => apiRequest('/api/auth/login', { method: 'POST', body: JSON.stringify(payload) }),
   publicStatus: () => apiRequest('/api/status'),
   knowledgeStatus: () => apiRequest('/api/knowledge/status'),
   searchKnowledge: (query, limit = 8, locale = 'auto') => apiRequest(`/api/knowledge/search?q=${encodeURIComponent(query)}&limit=${limit}&locale=${locale}`),

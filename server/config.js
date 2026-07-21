@@ -67,6 +67,7 @@ export const config = {
   incidentFile: process.env.INCIDENT_FILE || path.join(dataDir, 'incidents.json'),
   metricsFile: process.env.METRICS_FILE || path.join(dataDir, 'metrics.json'),
   userDataFile: process.env.USER_DATA_FILE || path.join(dataDir, 'user-data.enc.json'),
+  userAuthFile: process.env.USER_AUTH_FILE || path.join(dataDir, 'user-auth.enc.json'),
   privacyAuditFile: process.env.PRIVACY_AUDIT_FILE || path.join(dataDir, 'privacy-audit.jsonl'),
   shareDataFile: process.env.SHARE_DATA_FILE || path.join(dataDir, 'shares.enc.json'),
   uploadDirectory: process.env.UPLOAD_DIRECTORY || path.join(dataDir, 'uploads'),
