@@ -30,14 +30,32 @@ function headers(token, extra = {}) {
   return { ...extra, ...(token ? { Authorization: `Bearer ${token}` } : {}) };
 }
 
-async function errorMessage(response) {
-  const text = await response.text();
-  try {
-    const payload = JSON.parse(text);
-    return payload.error || payload.message || text || `HTTP ${response.status}`;
-  } catch {
-    return text || `HTTP ${response.status}`;
+export class GatewayHttpError extends Error {
+  constructor(message, { status = 0, code = null, payload = null } = {}) {
+    super(message);
+    this.name = 'GatewayHttpError';
+    this.status = status;
+    this.code = code;
+    this.payload = payload;
   }
+}
+
+async function gatewayError(response) {
+  const text = await response.text();
+  let payload = null;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    // Preserve non-JSON gateway errors as text.
+  }
+  return new GatewayHttpError(
+    payload?.error || payload?.message || text || `HTTP ${response.status}`,
+    { status: response.status, code: payload?.code || null, payload }
+  );
+}
+
+export function isGatewayAuthenticationError(error) {
+  return error?.status === 401 || /^AUTH_TOKEN_/.test(String(error?.code || ''));
 }
 
 export function parseSseBuffer(buffer = '') {
@@ -71,7 +89,7 @@ export async function streamGatewayChat({ gatewayUrl, message, history = [], tok
     }),
     signal
   });
-  if (!response.ok || !response.body) throw new Error(await errorMessage(response));
+  if (!response.ok || !response.body) throw await gatewayError(response);
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -116,7 +134,7 @@ async function apiJson(gatewayUrl, pathname, { token = '', method = 'GET', body,
     body: body === undefined ? undefined : JSON.stringify(body),
     signal
   });
-  if (!response.ok) throw new Error(await errorMessage(response));
+  if (!response.ok) throw await gatewayError(response);
   return response.status === 204 ? null : response.json();
 }
 
@@ -200,23 +218,39 @@ export async function runTerminalChat(options = {}) {
   let activeAbort = null;
   let exiting = false;
 
+  const resetInvalidSession = () => {
+    token = '';
+    attachmentIds = [];
+  };
+
   const ask = async (message, { silent = false } = {}) => {
     const userMessage = { role: 'user', content: message };
     const requestHistory = [...history, userMessage];
     activeAbort = new AbortController();
     if (!silent) output.write(`${c('assistant', 'blue')} ${c('›', 'dim')} `);
     let streamed = '';
+
+    const request = (requestToken, requestAttachmentIds) => streamGatewayChat({
+      gatewayUrl,
+      message,
+      history: requestHistory,
+      token: requestToken,
+      locale: options.locale || 'auto',
+      attachmentIds: requestAttachmentIds,
+      signal: activeAbort.signal,
+      onChunk: (chunk) => { streamed += chunk; if (!silent) output.write(chunk); }
+    });
+
     try {
-      const result = await streamGatewayChat({
-        gatewayUrl,
-        message,
-        history: requestHistory,
-        token,
-        locale: options.locale || 'auto',
-        attachmentIds,
-        signal: activeAbort.signal,
-        onChunk: (chunk) => { streamed += chunk; if (!silent) output.write(chunk); }
-      });
+      let result;
+      try {
+        result = await request(token, attachmentIds);
+      } catch (error) {
+        if (!token || !isGatewayAuthenticationError(error)) throw error;
+        resetInvalidSession();
+        if (!silent) output.write(`${c('[secure session expired; retrying without private context]', 'yellow')}\n`);
+        result = await request('', []);
+      }
       if (!silent && !streamed && result.text) output.write(result.text);
       if (!silent) output.write('\n\n');
       history.push(userMessage, { role: 'assistant', content: result.text || streamed });
@@ -277,11 +311,12 @@ export async function runTerminalChat(options = {}) {
     } else if (command.name === 'token') {
       if (!command.value) console.log(token ? c('Session token is configured in memory.', 'green') : c('No session token configured.', 'yellow'));
       else if (command.value === 'clear') {
-        token = '';
-        console.log(c('Session token cleared.', 'green'));
+        resetInvalidSession();
+        console.log(c('Session token and private attachment selection cleared.', 'green'));
       } else {
         token = command.value;
-        console.log(c('Session token set for this process only.', 'green'));
+        attachmentIds = [];
+        console.log(c('Session token set for this process only. It will be verified on first use.', 'green'));
       }
     } else if (command.name === 'attach') {
       if (!command.value) throw new Error('Usage: /attach <path>');
@@ -333,7 +368,10 @@ export async function runTerminalChat(options = {}) {
       if (await handleSlash(parseSlashCommand(trimmed))) continue;
       await ask(trimmed);
     } catch (error) {
-      console.error(c(`Error: ${error.message}`, 'red'));
+      if (isGatewayAuthenticationError(error)) {
+        resetInvalidSession();
+        console.error(c('Secure session was rejected and has been cleared. Use /token <value> to set a new one.', 'yellow'));
+      } else console.error(c(`Error: ${error.message}`, 'red'));
     }
   }
   rl.close();
