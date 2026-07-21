@@ -4,14 +4,32 @@ function apiUrl(path) {
   return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
+export class ApiError extends Error {
+  constructor(message, { status = 0, code = null, payload = null } = {}) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+    this.payload = payload;
+  }
+}
+
 async function parseError(response) {
   const text = await response.text();
+  let payload = null;
   try {
-    const payload = JSON.parse(text);
-    return payload.error || payload.message || text;
+    payload = JSON.parse(text);
   } catch {
-    return text || `HTTP ${response.status}`;
+    // Preserve non-JSON upstream errors as text.
   }
+  return new ApiError(
+    payload?.error || payload?.message || text || `HTTP ${response.status}`,
+    { status: response.status, code: payload?.code || null, payload }
+  );
+}
+
+export function isAuthenticationError(error) {
+  return error?.status === 401 || /^AUTH_TOKEN_/.test(String(error?.code || ''));
 }
 
 function authHeaders(token) {
@@ -19,16 +37,17 @@ function authHeaders(token) {
 }
 
 export async function apiRequest(path, options = {}) {
-  const { token, raw, headers, ...requestOptions } = options;
+  const { token, raw, headers, signal, ...requestOptions } = options;
   const response = await fetch(apiUrl(path), {
     ...requestOptions,
+    signal,
     headers: {
       'Content-Type': 'application/json',
       ...authHeaders(token),
       ...(headers || {})
     }
   });
-  if (!response.ok) throw new Error(await parseError(response));
+  if (!response.ok) throw await parseError(response);
   if (raw) return response;
   return response.status === 204 ? null : response.json();
 }
@@ -36,6 +55,7 @@ export async function apiRequest(path, options = {}) {
 export async function streamMedicalChat(message, history, onChunk, options = {}) {
   const response = await fetch(apiUrl('/api/chat/stream'), {
     method: 'POST',
+    signal: options.signal,
     headers: { 'Content-Type': 'application/json', ...authHeaders(options.token) },
     body: JSON.stringify({
       message,
@@ -44,7 +64,7 @@ export async function streamMedicalChat(message, history, onChunk, options = {})
       attachmentIds: options.attachmentIds || []
     })
   });
-  if (!response.ok || !response.body) throw new Error(await parseError(response));
+  if (!response.ok || !response.body) throw await parseError(response);
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -79,7 +99,7 @@ export async function streamMedicalChat(message, history, onChunk, options = {})
     if (done) break;
   }
 
-  if (streamError && !fullText) throw new Error(streamError);
+  if (streamError && !fullText) throw new ApiError(streamError);
   return { text: fullText, metadata, error: streamError };
 }
 
@@ -112,11 +132,11 @@ export const medicalApi = {
   searchKnowledge: (query, limit = 8, locale = 'auto') => apiRequest(`/api/knowledge/search?q=${encodeURIComponent(query)}&limit=${limit}&locale=${locale}`),
   terminology: (query, locale = 'auto') => apiRequest(`/api/knowledge/terminology?q=${encodeURIComponent(query)}&locale=${locale}`),
   streamChat: streamMedicalChat,
-  getProfile: (token) => apiRequest('/api/privacy/me', { token }),
+  getProfile: (token, options = {}) => apiRequest('/api/privacy/me', { token, ...options }),
   setConsent: (token, payload) => apiRequest('/api/privacy/consent', { method: 'POST', token, body: JSON.stringify(payload) }),
   updateContext: (token, payload) => apiRequest('/api/privacy/context', { method: 'PATCH', token, body: JSON.stringify(payload) }),
   addTimeline: (token, payload) => apiRequest('/api/privacy/timeline', { method: 'POST', token, body: JSON.stringify(payload) }),
-  listUploads: (token) => apiRequest('/api/uploads', { token }),
+  listUploads: (token, options = {}) => apiRequest('/api/uploads', { token, ...options }),
   uploadFile: async (token, file) => apiRequest('/api/uploads', {
     method: 'POST',
     token,
@@ -124,7 +144,7 @@ export const medicalApi = {
   }),
   deleteUpload: (token, id) => apiRequest(`/api/uploads/${encodeURIComponent(id)}`, { method: 'DELETE', token }),
   createShare: (token, payload) => apiRequest('/api/shares', { method: 'POST', token, body: JSON.stringify(payload) }),
-  listShares: (token) => apiRequest('/api/shares', { token }),
+  listShares: (token, options = {}) => apiRequest('/api/shares', { token, ...options }),
   revokeShare: (token, id) => apiRequest(`/api/shares/${encodeURIComponent(id)}`, { method: 'DELETE', token }),
   explainLabs: (payload) => apiRequest('/api/labs/explain', { method: 'POST', body: JSON.stringify(payload) }),
   downloadExport,
