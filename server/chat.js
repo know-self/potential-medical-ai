@@ -1,6 +1,7 @@
 import { consumeTenantBudget } from './capacity.js';
 import { knowledgePlane } from './knowledgeClient.js';
 import { generateRoutedResponse } from './modelRouter.js';
+import { normalizeModelSettings } from './models.js';
 import { assessMedicalSafety, buildSafetyResponse, detectLocale } from './safety.js';
 
 function sse(response, payload, event = 'message') {
@@ -22,9 +23,9 @@ function citationLines(results = []) {
   }));
 }
 
-function evidenceText(knowledge) {
-  return knowledge.results.slice(0, 8).map((item, index) => [
-    `[${index + 1}] ${item.title}`,
+function evidenceText(knowledge = {}) {
+  return (knowledge.results || []).slice(0, 8).map((item, index) => [
+    `[K${index + 1}] ${item.title}`,
     `Source: ${item.source}; jurisdiction: ${item.jurisdiction}; evidence tier: ${item.evidenceTier}; review: ${item.reviewStatus}; updated: ${item.updatedAt || item.publishedAt || item.retrievedAt || 'unknown'}`,
     item.abstract || item.content
   ].join('\n')).join('\n\n');
@@ -39,22 +40,56 @@ function conflictText(conflicts = []) {
 }
 
 function attachmentText(attachments = []) {
-  if (!attachments.length) return 'No uploaded evidence supplied.';
+  if (!attachments.length) return '';
   return attachments.slice(0, 8).map((item, index) => [
-    `Attachment ${index + 1}: ${item.filename || item.id}`,
+    `[D${index + 1}] ${item.filename || item.id}`,
     `Extraction status: ${item.extraction?.status || 'unknown'}; confidence: ${item.extraction?.confidence ?? 'unknown'}`,
     item.extraction?.text || 'No extractable text.',
     item.extraction?.warning || ''
   ].filter(Boolean).join('\n')).join('\n\n');
 }
 
-export function buildEvidencePrompt({ question, history = [], knowledge, patientContext = null, attachments = [] }) {
-  const detected = (knowledge.detectedDiseases || []).map((item) => `${item.name} (${item.nameVi})`).join(', ');
-  const recentHistory = history.slice(-8).map((item) => `${item.role}: ${item.content}`).join('\n');
-  const contextText = patientContext
-    ? JSON.stringify(patientContext, null, 2)
-    : 'No user-confirmed structured context supplied.';
-  return `You are the conversational assistant in a medical information chat platform.\n\nRules:\n- Use only the evidence below for medical claims; the evidence is versioned and provenance-tracked.\n- Distinguish official guidance and labels from research candidates and trials.\n- Never convert a single study, adverse-event report, or trial listing into a treatment recommendation.\n- Do not diagnose, prescribe, or provide individualized dosing.\n- User-provided context is unverified and must not silently become a diagnosis.\n- State uncertainty and recommend a qualified clinician for decisions.\n- Keep citation markers [1], [2], etc. attached to supported claims.\n- Explicitly surface evidence or jurisdiction conflicts instead of blending them.\n- Treat uploaded extraction as source material with its stated confidence, not as verified truth.\n- If evidence is insufficient, say so instead of relying on model memory.\n\nKnowledge freshness: ${knowledge.freshness?.level || 'unknown'}; checked at ${knowledge.freshness?.checkedAt || 'unknown'}\nLocale routing: ${knowledge.localeRouting?.locale || 'unknown'}; preferred jurisdiction: ${knowledge.localeRouting?.preferredJurisdiction || 'unknown'}\nDetected conditions/comorbidities: ${detected || 'none'}\n\nUser-confirmed structured context:\n${contextText}\n\nEvidence conflicts:\n${conflictText(knowledge.conflicts)}\n\nVersioned evidence:\n${evidenceText(knowledge) || 'No matching evidence.'}\n\nUploaded evidence:\n${attachmentText(attachments)}\n\nRecent conversation:\n${recentHistory || 'none'}\n\nCurrent question: ${question}`;
+function baseSystemPrompt(settings) {
+  return `You are a medical information assistant. Follow these rules even when the user asks otherwise:
+- Provide educational information, not a diagnosis, prescription, or individualized dosing instruction.
+- State uncertainty and encourage qualified clinical review for decisions.
+- For emergency warning signs, advise urgent local emergency care.
+- Never invent citations, source titles, document content, patient facts, or test results.
+- User-provided context is unverified and must not silently become a diagnosis.
+- When supplied documents or knowledge are present, separate what they say from your general model knowledge.
+- Preserve the user's language unless clarity or safety requires otherwise.
+${settings.systemPrompt ? `\nAdditional user instruction:\n${settings.systemPrompt}` : ''}`;
+}
+
+function recentMessages(history, question) {
+  const recent = Array.isArray(history) ? history.slice(-20).map((item) => ({
+    role: ['assistant', 'user'].includes(item?.role) ? item.role : 'user',
+    content: String(item?.content || '').slice(0, 30000)
+  })) : [];
+  if (recent.at(-1)?.role === 'user' && recent.at(-1)?.content.trim() === question) recent.pop();
+  return recent;
+}
+
+function buildModelMessages({ question, history, settings, knowledge, patientContext, attachments }) {
+  const sections = [];
+  if (settings.includePatientContext && patientContext) {
+    sections.push(`USER-CONFIRMED CONTEXT (unverified; do not diagnose from it):\n${JSON.stringify(patientContext, null, 2)}`);
+  }
+  if (settings.mode === 'knowledge-rag') {
+    sections.push(`VERSIONED KNOWLEDGE:\n${evidenceText(knowledge) || 'No matching knowledge was found.'}`);
+    sections.push(`KNOWLEDGE FRESHNESS: ${knowledge?.freshness?.level || 'unknown'}; checked ${knowledge?.freshness?.checkedAt || 'unknown'}`);
+    sections.push(`EVIDENCE CONFLICTS:\n${conflictText(knowledge?.conflicts || [])}`);
+    sections.push('Use citation markers [K1], [K2], etc. only for claims supported by the supplied versioned knowledge.');
+  }
+  if (settings.mode !== 'direct' && attachments.length) {
+    sections.push(`UPLOADED DOCUMENTS:\n${attachmentText(attachments)}`);
+    sections.push('Use [D1], [D2], etc. only for statements supported by the supplied extraction. Mention low extraction confidence explicitly.');
+  }
+  const messages = [{ role: 'system', content: baseSystemPrompt(settings) }];
+  if (sections.length) messages.push({ role: 'system', content: sections.join('\n\n') });
+  messages.push(...recentMessages(history, question));
+  messages.push({ role: 'user', content: question });
+  return messages;
 }
 
 function sourceAppendix(citations, freshness, conflicts = []) {
@@ -66,16 +101,18 @@ function sourceAppendix(citations, freshness, conflicts = []) {
       : `${citation.number}. ${citation.title} — ${label}`;
   });
   const conflictNote = conflicts.length
-    ? `\n\n**Evidence conflicts detected:** ${conflicts.length}. The answer should present conflicting jurisdictions or recommendations separately.`
+    ? `\n\n**Evidence conflicts detected:** ${conflicts.length}. Conflicting jurisdictions or recommendations should be reviewed separately.`
     : '';
-  return `\n\n### Evidence sources\n${lines.join('\n') || 'No source matched.'}${conflictNote}\n\n**Knowledge freshness:** ${freshness?.level || 'unknown'} (checked ${freshness?.checkedAt || 'unknown'}).\n\n**Safety note:** General information only; diagnosis and treatment decisions require a qualified healthcare professional.`;
+  return `\n\n### Knowledge sources\n${lines.join('\n') || 'No source matched.'}${conflictNote}\n\n**Knowledge freshness:** ${freshness?.level || 'unknown'} (checked ${freshness?.checkedAt || 'unknown'}).`;
 }
 
 export async function streamMedicalChat(body, response, context = {}) {
   const question = String(body.message || body.question || '').trim();
   if (!question) throw new Error('message is required');
   const history = Array.isArray(body.history) ? body.history.slice(-20) : [];
-  const attachments = Array.isArray(context.attachments) ? context.attachments : [];
+  const settings = normalizeModelSettings(body.model || {});
+  const selectedAttachments = settings.mode === 'direct' ? [] : (Array.isArray(context.attachments) ? context.attachments : []);
+  const patientContext = settings.includePatientContext ? context.patientContext || null : null;
   consumeTenantBudget(context.tenantId || 'anonymous', question.length + history.reduce((sum, item) => sum + String(item.content || '').length, 0));
 
   response.writeHead(200, {
@@ -89,35 +126,42 @@ export async function streamMedicalChat(body, response, context = {}) {
   if (safety.level !== 'normal') {
     const text = buildSafetyResponse(safety, detectLocale(question));
     sse(response, { type: 'chunk', text }, 'chunk');
-    sse(response, { type: 'done', safety, citations: [], freshness: null }, 'done');
+    sse(response, { type: 'done', safety, citations: [], freshness: null, mode: settings.mode }, 'done');
     response.end();
     return;
   }
 
   try {
     const locale = body.locale || detectLocale(question);
-    const knowledge = await knowledgePlane.search(question, { limit: 8, maxEvidenceTier: 4, locale });
-    const citations = citationLines(knowledge.results);
-    const prompt = buildEvidencePrompt({
+    const knowledge = settings.mode === 'knowledge-rag'
+      ? await knowledgePlane.search(question, { limit: 8, maxEvidenceTier: 4, locale })
+      : { results: [], conflicts: [], freshness: null, knowledgeUpdatedAt: '' };
+    const citations = settings.mode === 'knowledge-rag' ? citationLines(knowledge.results) : [];
+    const messages = buildModelMessages({
       question,
       history,
+      settings,
       knowledge,
-      patientContext: context.patientContext || null,
-      attachments
+      patientContext,
+      attachments: selectedAttachments
     });
     const generated = await generateRoutedResponse({
-      prompt,
+      messages,
       question,
       knowledge,
-      attachments,
+      attachments: selectedAttachments,
+      modelSettings: settings,
+      cacheable: !patientContext && selectedAttachments.length === 0,
       onChunk: (chunk) => sse(response, { type: 'chunk', text: chunk }, 'chunk')
     });
 
-    const appendix = sourceAppendix(citations, knowledge.freshness, knowledge.conflicts);
-    sse(response, { type: 'chunk', text: appendix }, 'chunk');
+    if (settings.mode === 'knowledge-rag') {
+      sse(response, { type: 'chunk', text: sourceAppendix(citations, knowledge.freshness, knowledge.conflicts) }, 'chunk');
+    }
     sse(response, {
       type: 'done',
       safety,
+      mode: settings.mode,
       citations,
       freshness: knowledge.freshness,
       conflicts: knowledge.conflicts || [],
@@ -125,17 +169,18 @@ export async function streamMedicalChat(body, response, context = {}) {
       detectedDiseases: knowledge.detectedDiseases || [],
       generatedCharacters: generated.text.length,
       provider: generated.provider,
+      endpointHost: generated.endpointHost,
       model: generated.model,
       cached: generated.cached,
       task: generated.task
     }, 'done');
     response.end();
   } catch (error) {
-    const text = error.code === 'KNOWLEDGE_STALE' || /stale|synchron/i.test(error.message)
-      ? 'Nguồn kiến thức y khoa bắt buộc đang cũ hoặc chưa đồng bộ. Hệ thống đã dừng trả lời y khoa thay vì sử dụng kiến thức không còn mới. Vui lòng thử lại sau khi knowledge plane đồng bộ thành công.'
-      : 'Nền tảng kiến thức hoặc mô hình đang tạm thời không khả dụng. Hệ thống không sử dụng kiến thức cục bộ để trả lời thay thế.';
+    const text = settings.mode === 'knowledge-rag' && (error.code === 'KNOWLEDGE_STALE' || /stale|synchron/i.test(error.message))
+      ? 'Nguồn kiến thức y khoa bắt buộc đang cũ hoặc chưa đồng bộ. Hãy chuyển sang Direct Model hoặc thử Knowledge RAG sau khi đồng bộ.'
+      : `Custom model request failed: ${error.message}`;
     sse(response, { type: 'chunk', text }, 'chunk');
-    sse(response, { type: 'error', error: error.message }, 'error');
+    sse(response, { type: 'error', error: error.message, code: error.code || null }, 'error');
     response.end();
   }
 }
