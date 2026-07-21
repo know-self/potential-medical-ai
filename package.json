@@ -1,8 +1,8 @@
 {
   "name": "potential-medical-ai",
-  "version": "3.2.1",
+  "version": "3.3.0",
   "type": "module",
-  "description": "Conversational medical assistant with governed realtime evidence, privacy controls, secure collaboration, multimodal ingestion, and MCP access",
+  "description": "Conversational medical assistant with custom OpenAI-compatible models, optional document and knowledge RAG, privacy controls, secure collaboration, and MCP access",
   "main": "server/server.js",
   "bin": {
     "pmai": "bin/pmai.js"
@@ -62,10 +62,10 @@
   "keywords": [
     "medical-ai",
     "healthcare",
+    "openai-compatible",
+    "rag",
     "mcp",
     "knowledge-control-plane",
-    "pubmed",
-    "clinical-guidelines",
     "react"
   ],
   "author": "David Bisky",
