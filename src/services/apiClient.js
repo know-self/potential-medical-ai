@@ -61,7 +61,8 @@ export async function streamMedicalChat(message, history, onChunk, options = {})
       message,
       history,
       locale: options.locale || 'auto',
-      attachmentIds: options.attachmentIds || []
+      attachmentIds: options.attachmentIds || [],
+      model: options.model || {}
     })
   });
   if (!response.ok || !response.body) throw await parseError(response);
