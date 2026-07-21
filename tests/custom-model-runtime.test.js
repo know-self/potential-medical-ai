@@ -22,7 +22,7 @@ function memoryStorage() {
 
 test('server normalizes generic OpenAI-compatible model settings', () => {
   const settings = normalizeServerSettings({
-    endpoint: 'https://models.example.com/v1/',
+    endpoint: 'https://models.example.com/v1/?api-version=2026-01',
     model: 'medical-model',
     apiKey: 'secret',
     mode: 'document-rag',
@@ -34,7 +34,7 @@ test('server normalizes generic OpenAI-compatible model settings', () => {
       Host: 'must-not-pass'
     }
   });
-  assert.equal(settings.endpoint, 'https://models.example.com/v1/chat/completions');
+  assert.equal(settings.endpoint, 'https://models.example.com/v1/chat/completions?api-version=2026-01');
   assert.equal(settings.model, 'medical-model');
   assert.equal(settings.mode, 'document-rag');
   assert.equal(settings.temperature, 2);
@@ -69,8 +69,7 @@ test('custom model runtime streams an OpenAI-compatible response through loopbac
     };
     response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8' });
     response.write('data: {"choices":[{"delta":{"content":"hello "}}]}\n\n');
-    response.write('data: {"choices":[{"delta":{"content":"world"}}]}\n\n');
-    response.end('data: [DONE]\n\n');
+    response.end('data: {"choices":[{"delta":{"content":"world"}}]}');
   });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -79,17 +78,19 @@ test('custom model runtime streams an OpenAI-compatible response through loopbac
   const streamed = [];
   const result = await streamCustomModelChunks({
     settings: {
-      endpoint: `http://127.0.0.1:${port}/v1`,
+      endpoint: `http://127.0.0.1:${port}/v1?api-version=test`,
+      endpointHost: 'untrusted-bypass-attempt',
       model: 'mock-model',
       apiKey: 'mock-key',
-      mode: 'direct'
+      mode: 'direct',
+      headers: { Authorization: 'Bearer attacker-value' }
     },
     messages: [{ role: 'user', content: 'test' }]
   }, (chunk) => streamed.push(chunk));
 
   assert.equal(result.text, 'hello world');
   assert.deepEqual(streamed, ['hello ', 'world']);
-  assert.equal(received.url, '/v1/chat/completions');
+  assert.equal(received.url, '/v1/chat/completions?api-version=test');
   assert.equal(received.authorization, 'Bearer mock-key');
   assert.equal(received.body.model, 'mock-model');
   assert.equal(received.body.stream, true);
